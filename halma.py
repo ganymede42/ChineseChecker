@@ -241,11 +241,11 @@ class Halma:
           k=board[j,i]
           if k==7: ss+='  '#'- '
           elif k==0: ss+='. '
-          else: ss+='%x '%k
+          else: ss+='%.2x'%k
         print(ss[ofs:])
 
 if __name__ == '__main__':
-  halma=Halma(verb=0xff)
+  halma=Halma(verbose=0xff)
   #halma=Halma(5)
   #halma.Init()
   #halma.Init([2,5])

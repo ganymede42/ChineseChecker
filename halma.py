@@ -16,14 +16,14 @@ value on board:
 5: army5
 6: army6
 7: out of board
-8: move trace (in SeekLongMoves)
+8: long move final points and move trace (in SeekLongMoves)
 9: start man (in SeekLongMoves for debug)
-
+a: short move final point
 verbose bits
- 0x001 : init raw board
- 0x002 : init nice board
- 0x004 :
- 0x008 :
+ 0x001 : init board
+ 0x002 : weight map
+ 0x004 : show all possible moves
+ 0x008 : show moves in function Halma.Move()
  0x010 :
  0x020 :
  0x040 :
@@ -47,8 +47,9 @@ class Halma:
   # size= count of biggest army line: default 4 creates army of 4+3+2+1=10 man
   # armyLblStartLst has the first index in the board where where the is located
 
-  def __init__(self,verbose=0,size=4):
+  def __init__(self,verbose=0xff,printMode=0x3,size=4):
     self.verbose=verbose
+    self.printMode=printMode
     self.size=size # size= count of biggest army line: default 4 creates army of 4+3+2+1=10 man
     self.armyLblStartLst=sil=np.ndarray(6,dtype=np.uint16)
     sz=size
@@ -65,8 +66,7 @@ class Halma:
     self.board=self.emptyboard()
     self.InitArmies(armyLbl)
     self.InitWeightMap()
-    if verb&0x01: self.print(0)
-    if verb&0x02: self.print(1)
+    if verb&0x01: self.printBrd(0x3)
 
   def emptyboard(self,board=None):
     sz=self.size
@@ -122,37 +122,44 @@ class Halma:
       army=armies[i,:]
       br[army]=armyLbl
 
-  def InitWeightMap(self):
+  def InitWeightMap(self,mode=0):
     #MUST BE CALLED AFTER INITARMIES!!!
+    verb=self.verbose
     sz=self.size
-    shape=(self.armiesLbl.size,)+self.board.shape
-    self.weightMap=wm=np.ndarray(shape=shape,dtype=np.uint16)
+    brd=self.board
+    oobIdx=np.where(brd.ravel()==7)
+    shape=(self.armiesLbl.size,)+brd.shape
+    self.weightMap=wms=np.ndarray(shape=shape,dtype=np.uint16)
     #self.weightMap.ravel()[0:300]=range(300)
-    wm[:]=0
-
+    wms[:]=0
     w=shape[1]
-    a=np.arange(w,dtype=np.uint16)
-    o=np.ones(w,dtype=np.uint16)
-    d=np.fromfunction(lambda i,j:i+j,((w+1)//2,(w+1)//2),dtype=int)
-    for idx,lbl in enumerate(self.armiesLbl):
-      if lbl==1:
-        wm[idx,:,:]=np.mat(a).T*np.mat(o)
-      elif lbl==2:
-        wm[idx,:,:]=0
-        wm[idx,sz:w-sz,sz:w-sz]=np.fliplr(d)
-      elif lbl==3:
-        wm[idx,:,:]=a[::-1]
-      elif lbl==4:
-        wm[idx,:,:]=np.mat(a[::-1]).T*np.mat(o)
-      elif lbl==5:
-        wm[idx,:,:]=0
-        wm[idx,sz:w-sz,sz:w-sz]=np.flipud(d)
-      elif lbl==6:
-        wm[idx,:,:]=a.T*o
-      print(wm[idx,:,:])
-      1
-        #*anp.mat(a).T*np.mat(a)
+    if mode==0:#linear distance to goal
+      a=np.arange(w,dtype=np.uint16)+1
+      o=np.ones(w,dtype=np.uint16)
+      d=np.fromfunction(lambda i,j:i+j-2*sz+1,(w,w),dtype=int)
+    elif mode==1:#linear + inverse progressive distance to goal
+      a=np.arange(w,dtype=np.uint16)
+      a+a[::-1].cumsum()/8
+      o=np.ones(w,dtype=np.uint16)
+      d=np.fromfunction(lambda i,j:i+j-2*sz,(w,w),dtype=int)
 
+    for idx,lbl in enumerate(self.armiesLbl):
+      wm=wms[idx,:,:]
+      if lbl==1:
+        wm[:,:]=np.mat(a).T*np.mat(o)
+      elif lbl==2:
+        wm[:,:]=np.fliplr(d)
+      elif lbl==3:
+        wm[:,:]=a[::-1]
+      elif lbl==4:
+        wm[:,:]=np.mat(a[::-1]).T*np.mat(o)
+      elif lbl==5:
+        wm[:,:]=np.flipud(d)
+      elif lbl==6:
+        wm[:,:]=a.T*o
+      wm[:,:].ravel()[oobIdx]=0
+      if verb&0x02: self.printBrd(0x5,wms[idx,:,:])
+      1
 
   class Seek:
     def __init__(self,board):
@@ -165,6 +172,7 @@ class Halma:
       #'mv' are the available move list
 
   def SeekMoves(self,armyIdx,board=None):
+    verb=self.verbose
     if board is None: board=self.board
     # a b
     # c . d
@@ -177,77 +185,117 @@ class Halma:
     seek=Halma.Seek(board)
     w=seek.w;maxIdx=seek.maxIdx;br=seek.br;mv=seek.mv
     armyLbl=br[army[0]]
-    for man in army:
+    #for man in army:
+    for man,manIdx in enumerate(army):
       #TODO:resize moves if needed
       br[man]=9; #self.print(1)
       js=i
       #short moves:
       p=man-w-1
-      if p>0 and not br[p]: mv[i,:]=(man,p);i+=1
+      if p>0 and not br[p]: mv[i,:]=(manIdx,p);i+=1
       p=man-w
-      if p>0 and not br[p]: mv[i,:]=(man,p);i+=1
+      if p>0 and not br[p]: mv[i,:]=(manIdx,p);i+=1
       p=man-1
-      if p>0 and not br[p]: mv[i,:]=(man,p);i+=1
+      if p>0 and not br[p]: mv[i,:]=(manIdx,p);i+=1
       p=man+1
-      if p<maxIdx and not br[p]: mv[i,:]=(man,p);i+=1
+      if p<maxIdx and not br[p]: mv[i,:]=(manIdx,p);i+=1
       p=man+w
-      if p<maxIdx and not br[p]: mv[i,:]=(man,p);i+=1
+      if p<maxIdx and not br[p]: mv[i,:]=(manIdx,p);i+=1
       p=man+w+1
-      if p<maxIdx and not br[p]: mv[i,:]=(man,p);i+=1
+      if p<maxIdx and not br[p]: mv[i,:]=(manIdx,p);i+=1
       #long mv:
-      if i>js:
-        print('short moves',mv[js:i,:])
       jl=i
+      seek.manIdx=maxIdx
       i=Halma.SeekLongMoves(seek, man, man, i)
-      if i>jl:
-        print('long moves',mv[jl:i,:])
+
       if i>js:
-        br[mv[js:jl,1]]=0xa
-        self.print(1)
+        if verb&0x04 and i>js:
+          print('%d short %d long moves'%(jl-js,i-jl))
+          print(mv[js:i,:].T)
+          br[mv[js:jl,1]]=0xa
+          self.printBrd(0x3)
         br[mv[js:i,1]]=0
       br[man]=armyLbl
 
   @staticmethod
   def SeekLongMoves(seek,man,pcur,i):
-    w=seek.w;maxIdx=seek.maxIdx;br=seek.br;mv=seek.mv
+    w=seek.w;maxIdx=seek.maxIdx;br=seek.br;mv=seek.mv;maxIdx=seek.maxIdx
     w2=2*w
     #TODO:resize mv if needed
     p1=pcur-w-1; p2=pcur-w2-2
-    if p2>0 and br[p1]>0 and br[p1]<=6 and not br[p2]: mv[i,:]=(man,p);br[p]=8;i=Halma.SeekLongMoves(seek,man,p2,i+1)
+    if p2>0 and br[p1]>0 and br[p1]<=6 and not br[p2]: mv[i,:]=(maxIdx,p2);br[p2]=8;i=Halma.SeekLongMoves(seek,man,p2,i+1)
     p1=pcur-w  ; p2=pcur-w2
-    if p2>0 and br[p1]>0 and br[p1]<=6 and not br[p2]: mv[i,:]=(man,p);br[p]=8;i=Halma.SeekLongMoves(seek,man,p2,i+1)
+    if p2>0 and br[p1]>0 and br[p1]<=6 and not br[p2]: mv[i,:]=(maxIdx,p2);br[p2]=8;i=Halma.SeekLongMoves(seek,man,p2,i+1)
     p1=pcur-1  ; p2=pcur-2
-    if p2>0 and br[p1]>0 and br[p1]<=6 and not br[p2]: mv[i,:]=(man,p);br[p]=8;i=Halma.SeekLongMoves(seek,man,p2,i+1)
+    if p2>0 and br[p1]>0 and br[p1]<=6 and not br[p2]: mv[i,:]=(maxIdx,p2);br[p2]=8;i=Halma.SeekLongMoves(seek,man,p2,i+1)
     p1=pcur+1  ; p2=pcur+2
-    if p2<maxIdx and br[p1]>0 and br[p1]<=6 and not br[p2]: mv[i,:]=(man,p);br[p]=8;i=Halma.SeekLongMoves(seek,man,p2,i+1)
+    if p2<maxIdx and br[p1]>0 and br[p1]<=6 and not br[p2]: mv[i,:]=(maxIdx,p2);br[p2]=8;i=Halma.SeekLongMoves(seek,man,p2,i+1)
     p1=pcur+w  ; p2=pcur+w2
-    if p2<maxIdx and br[p1]>0 and br[p1]<=6 and not br[p2]: mv[i,:]=(man,p2);br[p2]=8;i=Halma.SeekLongMoves(seek,man,p2,i+1)
+    if p2<maxIdx and br[p1]>0 and br[p1]<=6 and not br[p2]: mv[i,:]=(maxIdx,p2);br[p2]=8;i=Halma.SeekLongMoves(seek,man,p2,i+1)
     p1=pcur+w+1; p2=pcur+w2+2
-    if p2<maxIdx and br[p1]>0 and br[p1]<=6 and not br[p2]: mv[i,:]=(man,p2);br[p2]=8;i=Halma.SeekLongMoves(seek,man,p2,i+1)
+    if p2<maxIdx and br[p1]>0 and br[p1]<=6 and not br[p2]: mv[i,:]=(maxIdx,p2);br[p2]=8;i=Halma.SeekLongMoves(seek,man,p2,i+1)
     return i
 
-  def print(self,mode):
-    board=self.board
-    if mode==0:
+  def Move(self,armyIdx,manIdx,dspPos,board=None):
+    if board is None: board=self.board
+    bd=board.ravel()
+    army=self.armies[armyIdx,:]
+    lbl=self.armiesLbl[armyIdx]
+    bdIdx=army[manIdx]
+    assert bd[bdIdx]==lbl,'move error on that board'
+    bd[bdIdx]=0
+    army[manIdx]=dspPos
+    bd[dspPos]=lbl
+    if self.verbose&0x08:
+      self.printBrd(0x3)
+
+  def printBrd(self,mode,board=None):
+    if board is None:
+      board=self.board
+    if mode&1:
       print(board)
-    elif mode==1:
+    if mode&2:
       s=board.shape
       sz=self.size
-      w=sz*4+1
-      ofs=sz*3+1
+      w=sz*4
+      ofsS=sz*3*1
+      ofsE=sz*3*1+(sz*3+1)*2
       for j in range(s[0]):
         ss = ' '*(w-j)
         for i in range(s[1]):
           k=board[j,i]
-          if k==7: ss+='  '#'- '
-          elif k==0: ss+='. '
-          else: ss+='%.2x'%k
-        print(ss[ofs:])
+          if k==7: ss+='  '#'+-'
+          elif k==0: ss+=' .'#'cd'
+          else: ss+='%2.x'%k
+        print(ss[ofsS:ofsE])
+    if mode&4:
+      s=board.shape
+      sz=self.size
+      w=sz*4
+      ofsS=sz*3*3
+      ofsE=sz*3*3+(sz*3+1)*6
+      #width of element has to be even: here it is 6
+      for j in range(s[0]):
+        ss = '   '*(w-j) #half width of element (3)
+        for i in range(s[1]):
+          k=board[j,i]
+          if k==0: ss+='      '#'+    -'
+          else: ss+='%6.5g'%(k)
+          #else: ss+='+%4.3g-'%(k*10.123)
+        print(ss[ofsS:ofsE])
 
 if __name__ == '__main__':
-  halma=Halma(verbose=0xff)
-  #halma=Halma(5)
+  v=0xff
+  v=0xf3
+  #v=0x02
+  halma=Halma(verbose=v,printMode=0x3)
+  #halma=Halma(verbose=v,printMode=0x3,size=5)
   #halma.Init()
   #halma.Init([2,5])
-  halma.Init([1,2])
+  #halma.Init([1,2])
   #halma.SeekMoves(armyIdx=0)
+
+  halma.Init([1,])
+  halma.Move(0,0,17*5+6)
+  halma.SeekMoves(armyIdx=0)
+

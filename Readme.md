@@ -1,49 +1,6 @@
-> position startpos
-> print
- A|
- B|                          x
- C|                        x x
- D|                      x x x
- E|                    x x x x
- F|          . . . . . . . . . . . . .
- G|          . . . . . . . . . . . .
- H|          . . . . . . . . . . .
- I|          . . . . . . . . . .
- J|          . . . . . . . . .
- K|        . . . . . . . . . .
- L|      . . . . . . . . . . .
- M|    . . . . . . . . . . . .
- N|  . . . . . . . . . . . . .
- O|          + + + +
- P|          + + +
- Q|          + +
- R|          +
- S|
-   --------------------------------------
-   a b c d e f g h i j k l m n o p q r s
-
-
-
- 0|                        1        
- 1|                      1 1        
- 2|                    1 1 1        
- 3|                  1 1 1 1        
- 4|        6 6 6 6 . . . . . 2 2 2 2
- 5|        6 6 6 . . . . . . 2 2 2  
- 6|        6 6 . . . . . . . 2 2    
- 7|        6 . . . . . . . . 2      
- 8|        . . . . . . . . .        
- 9|      5 . . . . . . . . 3        
- a|    5 5 . . . . . . . 3 3        
- b|  5 5 5 . . . . . . 3 3 3        
- c|5 5 5 5 . . . . . 3 3 3 3        
- d|        4 4 4 4                  
- e|        4 4 4                    
- f|        4 4                      
- g|        4                        
-   ---------------------------------
-   0 1 2 3 4 5 6 7 8 9 a b c d e f g
-
+Board Representation
+--------------------
+```
  0|. . . . 1 . . . . . . . . . . . .
  1|. . . . 1 1 . . . . . . . . . . .
  2|. . . . 1 1 1 . . . . . . . . . .
@@ -87,11 +44,28 @@ Store armRep in a 10x1 unsigned short array. The number is y+17*x. the position 
 Store brdRep is a 17x17 unsigned byte array. number 1-6 is a man of the army, 0 is a empty field(+), f is a forbidden field(.)
 
 First approach: move one army as fast as possible to the goal.
+```
 
+Interface
+---------
+```
+select man 0..9
+for the selected man show possible destinations with numbers 0..z
+```
 
+Moves
+-----
+```
+# a b
+# c . d
+#   e f
 
-
-
+#Possible short moves:
+#=a=-18 b=-17 c=-1 d=+1 e=+17 f=+18
+#
+#Possible jump moves:
+#=a=-2*18 b=-2*17 c=-1*2 d=+1*2 e=+17*2 f=+18*2
+```
 
 
 

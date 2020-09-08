@@ -126,38 +126,63 @@ class Halma:
     verb=self.verbose
     sz=self.size
     bd=self.board
-    oobIdx=np.where(bd.ravel()==7)
+    usedIdx=np.nonzero(bd!=7)
     shape=(self.armiesLbl.size,)+bd.shape
-    self.weightMap=wms=np.ndarray(shape=shape,dtype=np.uint16)
-    #self.weightMap.ravel()[0:300]=range(300)
+    self.weightMap=wms=np.ndarray(shape=shape,dtype=np.float)
     wms[:]=0
     w=shape[1]
-    if mode==0:#linear distance to goal
-      a=np.arange(w,dtype=np.uint16)+1
-      o=np.ones(w,dtype=np.uint16)
-      d=np.fromfunction(lambda i,j:i+j-2*sz+1,(w,w),dtype=int)
-    elif mode==1:#linear + inverse progressive distance to goal
-      a=np.arange(w,dtype=np.uint16)
-      a+a[::-1].cumsum()/8
-      o=np.ones(w,dtype=np.uint16)
-      d=np.fromfunction(lambda i,j:i+j-2*sz,(w,w),dtype=int)
 
+    a=np.arange(w,dtype=np.float)+1
+    #inverse progressive distance to goal
+    a=(a+a[::-1].cumsum()/4)
+    a/=a[0]
+    o=np.ones(w,dtype=np.float)
+    wm2d=np.asarray(np.mat(a).T*np.mat(o))
+    #penalize non central
+    nctr=np.fromfunction(lambda y,x:np.abs(2*(x-sz)-y),(w,w),dtype=int)
+    wm2d-=nctr*.3
+
+    wm1d=wm2d[usedIdx]
+
+    #testing ascending weight array
+    #wm1d=np.arange(1,usedIdx[0].size+1)
+
+    #-------- setting up sort arrays --------
+    itlx=np.arange(w*w,dtype=int).reshape(w,w)
+    itly=itlx.T
+    iblx=itlx[::-1,:]
+    itrx=itlx[:,::-1]
+    ibrx=itlx[::-1,::-1]
+    ibly=itly[::-1,:]
+    itry=itly[:,::-1]
+    ibry=itly[::-1,::-1]
+    #wm=wms[0,:,:]
+    #wm[usedIdx]=wm1d[np.argsort(itlx[usedIdx])];self.printBrd(0x5,wm)#1
+    #wm[usedIdx]=wm1d[np.argsort(itly[usedIdx])];self.printBrd(0x5,wm)#6-
+    #wm[usedIdx]=wm1d[np.argsort(iblx[usedIdx])];self.printBrd(0x5,wm)#4
+    #wm[usedIdx]=wm1d[np.argsort(itrx[usedIdx])];self.printBrd(0x5,wm)#1-
+    #wm[usedIdx]=wm1d[np.argsort(ibrx[usedIdx])];self.printBrd(0x5,wm)#4-
+    #wm[usedIdx]=wm1d[np.argsort(ibly[usedIdx])];self.printBrd(0x5,wm)#2
+    #wm[usedIdx]=wm1d[np.argsort(itry[usedIdx])];self.printBrd(0x5,wm)#-5
+    #wm[usedIdx]=wm1d[np.argsort(ibry[usedIdx])];self.printBrd(0x5,wm)#-3
     for idx,lbl in enumerate(self.armiesLbl):
       wm=wms[idx,:,:]
       if lbl==1:
-        wm[:,:]=np.mat(a).T*np.mat(o)
+        wm[usedIdx]=wm1d[np.argsort(itlx[usedIdx])]#1
       elif lbl==2:
-        wm[:,:]=np.fliplr(d)
+        wm[usedIdx]=wm1d[np.argsort(ibly[usedIdx])]
       elif lbl==3:
-        wm[:,:]=a[::-1]
+        wm[usedIdx]=wm1d[np.argsort(ibry[usedIdx])]
       elif lbl==4:
-        wm[:,:]=np.mat(a[::-1]).T*np.mat(o)
+        wm[usedIdx]=wm1d[np.argsort(iblx[usedIdx])]#4
       elif lbl==5:
-        wm[:,:]=np.flipud(d)
+        wm[usedIdx]=wm1d[np.argsort(itry[usedIdx])]#5
       elif lbl==6:
-        wm[:,:]=a.T*o
-      wm[:,:].ravel()[oobIdx]=0
+        wm[usedIdx]=wm1d[np.argsort(itly[usedIdx])]#6
+      #wm[:,:].ravel()[oobIdx]=0
       if verb&0x02: self.printBrd(0x5,wms[idx,:,:])
+      #print(lbl)
+      #1
 
   class SeekNode:
     def __init__(self,halma,armyIdx):
@@ -174,10 +199,11 @@ class Halma:
       self.army=halma.armies[armyIdx,:]
       self.armyLbl=armyLbl=halma.armiesLbl[armyIdx]
 
-      self.mv=mv=np.ndarray(shape=(l,2),dtype=np.uint16)  # allocate hopefully big enough array
-      self.mvQ=mvq=np.ndarray(shape=(l),dtype=np.float)  # allocate hopefully big enough array
+      self._mvRaw=mv=np.ndarray(shape=(l,2),dtype=np.uint16)  # allocate hopefully big enough array
+      self._mvRawQ=mvQ=np.ndarray(shape=(l),dtype=np.float)  # allocate hopefully big enough array
+      #_mvRaw,_mvRawQ is the whole array mv,mvQ is a view that is resized
       mv[:]=0  #for debug
-      mvq[:]=0  #for debug
+      mvQ[:]=0  #for debug
       #'bd' is the board on which moves are seeked
       #'mv' are the available move list
 
@@ -191,7 +217,7 @@ class Halma:
     #Possible jump moves:   =a=-2*18 b=-2*17 c=-1*2 d=+1*2 e=+17*2 f=+18*2
     i=0
     seek=Halma.SeekNode(self,armyIdx)
-    w=seek.w;maxIdx=seek.maxIdx;bd=seek.bd;mv=seek.mv
+    w=seek.w;maxIdx=seek.maxIdx;bd=seek.bd;mv=seek._mvRaw
     armyLbl=seek.armyLbl;army=seek.army
     #armyLbl=bd[self.army[0]]
     #for man in army:
@@ -225,15 +251,17 @@ class Halma:
           self.printBrd(0x2)
         bd[mv[js:i,1]]=0
       bd[man]=armyLbl
-    self.EvalMoves(seek,i)
-    best=np.argmax(seek.mvQ[:i])
+    seek.mv=seek._mvRaw[:i,:]# view of _mvRaw object with correct size
+    seek.mvQ=seek._mvRawQ[:i]# view of _mvRawQ object with correct size
+    self.EvalMoves(seek)
+    best=np.argmax(seek.mvQ)
     manIdx,dspPos=mv[best,:]
     verb=self.verbose&0x10
     self.Move(army,manIdx,dspPos,verb=verb)
 
   @staticmethod
   def SeekLongMoves(seek,man,pcur,i):
-    w=seek.w;maxIdx=seek.maxIdx;bd=seek.bd;mv=seek.mv;manIdx=seek.manIdx
+    w=seek.w;maxIdx=seek.maxIdx;bd=seek.bd;mv=seek._mvRaw;manIdx=seek.manIdx
     w2=2*w
     #TODO:resize mv if needed
     p1=pcur-w-1; p2=pcur-w2-2
@@ -250,14 +278,15 @@ class Halma:
     if p2<maxIdx and bd[p1]>0 and bd[p1]<=6 and not bd[p2]: mv[i,:]=(manIdx,p2);bd[p2]=8;i=Halma.SeekLongMoves(seek,man,p2,i+1)
     return i
 
-  def EvalMoves(self,seek,i):
+  def EvalMoves(self,seek):
     bd=seek.bd;mv=seek.mv;mvQ=seek.mvQ;armyIdx=seek.armyIdx
     verb=self.verbose&0x08
     army=seek.army
-    print('%d moves'%(i))
-    print(mv[:i,:].T)
+    numMv=mv.shape[0]
+    print('%d moves'%numMv)
+    print(mv.T)
     wm=self.weightMap[armyIdx].ravel()
-    for k in range(i):
+    for k in range(numMv):
       manIdx,dspPos=mv[k,:]
       srcPos=self.Move(army,manIdx,dspPos,verb=verb)
       mvQ[k]=wm[army].sum()
@@ -313,20 +342,50 @@ class Halma:
           #else: ss+='+%4.3g-'%(k*10.123)
         print(ss[ofsS:ofsE])
 
+
 if __name__ == '__main__':
-  #v=0xffff
-  v=0x13
-  #v=0xf3
-  #v=0x02
-  halma=Halma(verbose=v)
-  #halma=Halma(verbose=v,size=5)
-  #halma.Init()
-  #halma.Init([2,5])
-  #halma.Init([1,2])
-  #halma.SeekMoves(armyIdx=0)
 
-  halma.Init([1,])
-  srcPos=halma.Move(halma.armies[0],0,17*5+6,verb=True)
-  for i in range(30):
-    halma.SeekMoves(armyIdx=0)
+  #terup terminal not to buffer until EOL
+  try:
+    import sys,termios
+    fd=sys.stdin.fileno()
+    new=termios.tcgetattr(fd)
+    #When ICANON is set, the terminal buffers a line at a time, and enables line editing.
+    #Without ICANON, input is made available to programs immediately
+    new[3]=new[3]&~termios.ICANON  # lflags
+    termios.tcsetattr(fd,termios.TCSADRAIN,new)
+  except termios.error as e:
+    print("can't setup termios")
 
+  def getkey():
+    return sys.stdin.read(1)
+
+  def main():
+    #v=0xffff
+    v=0x17
+    #v=0xf3
+    #v=0x02
+    halma=Halma(verbose=v)
+    #halma=Halma(verbose=v,size=5)
+    #halma.Init();exit(0)
+    #halma.Init([1,4,5,6]);exit(0)
+    #halma.Init([2,5])
+    #halma.Init([1,2])
+    #halma.SeekMoves(armyIdx=0)
+
+    halma.Init([1,])
+    #srcPos=halma.Move(halma.armies[0],0,17*5+6,verb=True)
+    print('Initialization done, press key')
+    i=0
+    while True:
+      k=getkey()
+      if k=='x':break
+      elif k=='b':#do best computer move
+        halma.SeekMoves(armyIdx=0)
+        print('move %d, press key'%i)
+        i+=1
+      elif k=='s':#show moves
+        pass
+      elif k=='w':#show weight map
+        pass
+  main()

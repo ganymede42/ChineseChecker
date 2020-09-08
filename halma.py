@@ -22,9 +22,9 @@ a: short move final point
 verbose bits
  0x001 : init board
  0x002 : weight map
- 0x004 : show all possible moves
- 0x008 : show moves in  Halma.EvalMoves()
- 0x010 : show best move Halma.SeekMoves()
+ 0x004 : show all possible moves Halma.SeekMoves()
+ 0x008 : show moves quality in  Halma.EvalMoves()
+ 0x010 :
  0x020 :
  0x040 :
  0x080 :
@@ -35,7 +35,8 @@ verbose bits
 '''
 
 import numpy as np
-np.set_printoptions(edgeitems=30, linewidth=100000, formatter=dict(float=lambda x: "%.3g" % x))
+np.set_printoptions(edgeitems=30, linewidth=100000, precision=2)
+#np.set_printoptions(edgeitems=30, linewidth=100000, formatter=dict(float=lambda x: "%.3g" % x))
 import logging
 _log=logging.getLogger(__name__)
 if __name__ == '__main__':
@@ -216,9 +217,9 @@ class Halma:
     #Possible short moves:  =a=-18   b=-17   c=-1   d=+1   e=+17   f=+18
     #Possible jump moves:   =a=-2*18 b=-2*17 c=-1*2 d=+1*2 e=+17*2 f=+18*2
     i=0
-    seek=Halma.SeekNode(self,armyIdx)
-    w=seek.w;maxIdx=seek.maxIdx;bd=seek.bd;mv=seek._mvRaw
-    armyLbl=seek.armyLbl;army=seek.army
+    skNd=Halma.SeekNode(self,armyIdx)
+    w=skNd.w;maxIdx=skNd.maxIdx;bd=skNd.bd;mv=skNd._mvRaw
+    armyLbl=skNd.armyLbl;army=skNd.army
     #armyLbl=bd[self.army[0]]
     #for man in army:
     for manIdx,man in enumerate(army):
@@ -240,8 +241,8 @@ class Halma:
       if p<maxIdx and not bd[p]: mv[i,:]=(manIdx,p);i+=1
       #long mv:
       jl=i
-      seek.manIdx=manIdx
-      i=Halma.SeekLongMoves(seek, man, man, i)
+      skNd.manIdx=manIdx
+      i=Halma.SeekLongMoves(skNd, man, man, i)
 
       if i>js:
         if verb&0x04 and i>js:
@@ -251,13 +252,15 @@ class Halma:
           self.printBrd(0x2)
         bd[mv[js:i,1]]=0
       bd[man]=armyLbl
-    seek.mv=seek._mvRaw[:i,:]# view of _mvRaw object with correct size
-    seek.mvQ=seek._mvRawQ[:i]# view of _mvRawQ object with correct size
-    self.EvalMoves(seek)
-    best=np.argmax(seek.mvQ)
+    skNd.mv=skNd._mvRaw[:i,:]# view of _mvRaw object with correct size
+    skNd.mvQ=skNd._mvRawQ[:i]# view of _mvRawQ object with correct size
+    return skNd
+
+  def ExecBestMove(self,skNd):
+    mv=skNd.mv;mvQ=skNd.mvQ;army=skNd.army
+    best=np.argmax(mvQ)
     manIdx,dspPos=mv[best,:]
-    verb=self.verbose&0x10
-    self.Move(army,manIdx,dspPos,verb=verb)
+    self.Move(army,manIdx,dspPos,verb=True)
 
   @staticmethod
   def SeekLongMoves(seek,man,pcur,i):
@@ -283,17 +286,26 @@ class Halma:
     verb=self.verbose&0x08
     army=seek.army
     numMv=mv.shape[0]
-    print('%d moves'%numMv)
-    print(mv.T)
+    #print('%d moves'%numMv)
+    #print(mv.T)
     wm=self.weightMap[armyIdx].ravel()
     for k in range(numMv):
       manIdx,dspPos=mv[k,:]
       srcPos=self.Move(army,manIdx,dspPos,verb=verb)
       mvQ[k]=wm[army].sum()
+      maxDiff=np.diff(np.sort(army)).max()/seek.w
+      if maxDiff>2.5:
+        mvQ[k]-=maxDiff
       if verb: print(mvQ[k])
       self.Move(army,manIdx,srcPos)
 
-
+  def ShowSeekNode(self,skNd):
+    bd=skNd.bd;mv=skNd.mv;mvQ=skNd.mvQ;armyIdx=skNd.armyIdx
+    verb=self.verbose&0x08
+    army=skNd.army
+    numMv=mv.shape[0]
+    print('%d moves'%numMv)
+    print(np.vstack((mv.T,mvQ.T)))
 
   def Move(self,army,manIdx,dspPos,board=None,verb=False):
     if board is None: board=self.board
@@ -342,6 +354,22 @@ class Halma:
           #else: ss+='+%4.3g-'%(k*10.123)
         print(ss[ofsS:ofsE])
 
+  def RunSeekTree(self, depth=3, reduce=3):
+    #depth= search deph levels
+    #reduce = maximal children per node
+    #skNd=self.SeekMoves(armyIdx=0)
+    #self.EvalMoves(skNd)
+    #self
+    #SeekTreeMove(self,skNdParent,depth=3,reduce=3)
+    pass
+
+  def SeekTreeMove(self, skNdParent, depth=3, reduce=3):
+    #depth= search deph levels
+    #reduce = maximal children per node
+    skNd=self.SeekMoves(armyIdx=0)
+    self.EvalMoves(skNd)
+
+    pass
 
 if __name__ == '__main__':
 
@@ -358,11 +386,12 @@ if __name__ == '__main__':
     print("can't setup termios")
 
   def getkey():
-    return sys.stdin.read(1)
+    k=sys.stdin.read(1)
+    return k[0]
 
   def main():
     #v=0xffff
-    v=0x17
+    v=0x03
     #v=0xf3
     #v=0x02
     halma=Halma(verbose=v)
@@ -380,12 +409,18 @@ if __name__ == '__main__':
     while True:
       k=getkey()
       if k=='x':break
-      elif k=='b':#do best computer move
-        halma.SeekMoves(armyIdx=0)
+      elif k=='b':#do best computer move depth=1
+        skNd=halma.SeekMoves(armyIdx=0)
+        halma.EvalMoves(skNd)
+        halma.ExecBestMove(skNd)
         print('move %d, press key'%i)
         i+=1
+      elif k=='t':  #do best computer move depth=n
+        halma.SeekTreeMove(depth=3,reduce=3)
       elif k=='s':#show moves
-        pass
+        skNd=halma.SeekMoves(armyIdx=0)
+        halma.EvalMoves(skNd)
+        halma.ShowSeekNode(skNd)
       elif k=='w':#show weight map
         pass
   main()

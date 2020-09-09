@@ -35,13 +35,47 @@ verbose bits
 '''
 
 import numpy as np
+import ctypes as ct
 np.set_printoptions(edgeitems=30, linewidth=100000, precision=2)
 #np.set_printoptions(edgeitems=30, linewidth=100000, formatter=dict(float=lambda x: "%.3g" % x))
 import logging
 _log=logging.getLogger(__name__)
 if __name__ == '__main__':
   logging.basicConfig(level=logging.DEBUG,format='%(levelname)s:%(module)s:%(lineno)d:%(funcName)s:%(message)s ')
-  pass
+
+
+#C-types array structures for searching tree
+#--------------------------------------------
+#https://stackoverflow.com/questions/40063080/casting-an-array-of-c-structs-to-a-numpy-array
+#https://numpy.org/doc/stable/user/basics.rec.html
+#https://numpy.org/doc/stable/reference/generated/numpy.ndarray.ctypes.html?highlight=ctypes#numpy.ndarray.ctypes
+>>> class POINT(Structure):
+...     _fields_ = [("x", c_int),
+...                 ("y", c_int)]
+.
+
+
+class InfoC(ct.Structure):
+     _fields_ = [('armies',     ct.POINTER(ct.c_uint16)),
+     _fields_ = [('armiesLbl',  ct.POINTER(ct.c_uint8)),
+     _fields_ = [('numArmies',  ct.c_uint8),
+     _fields_ = [('lenArmy',    ct.c_uint8),
+     _fields_ = [('board',      ct.POINTER(ct.c_uint8)),
+     _fields_ = [('weightmaps', ct.POINTER(ct.c_float)),
+     _fields_ = [('distmap',    ct.POINTER(ct.c_uint8)),
+     _fields_ = [('w',          ct.uint8)]
+
+
+tSeekManC=np.dtype([('manIdx',np.uint8),('dstPos',np.uint16),('quality',np.float)],align=True)
+tSeekArmyC=np.dtype([('armyIdx',np.uint8),('moves',tSeekManC, (128,)),('lenUsedMoves',np.uint8)],align=True)
+SeekTreeC=np.dtype([('bestQuality',np.float),('bestIdx',np.uint8)],align=True)
+#x=np.array([(2,3,4)],dtype=tSeekManC)
+#np.ndarray(shape=(1,),dtype=tSeekArmyC)
+#np.empty(shape=(1,),dtype=tSeekArmyC)
+#np.zeros(shape=(1,),dtype=tSeekArmyC)
+
+
+
 
 class Halma:
   # start index position of each army (1-6) on the board
@@ -270,6 +304,9 @@ class Halma:
     #Possible jump moves:   =a=-2*18 b=-2*17 c=-1*2 d=+1*2 e=+17*2 f=+18*2
     i=0
     skNd=Halma.SeekNode(self,armyIdx)
+    skArmy=np.zeros((1,),tSeekArmyC)
+    #skArmy[0]['armyIdx']; x=skArmy[0]; x['armyIdx']; x.dtype
+
     w=skNd.w;maxIdx=skNd.maxIdx;bd=skNd.bd;mv=skNd._mvRaw
     armyLbl=skNd.armyLbl;army=skNd.army
     #armyLbl=bd[self.army[0]]

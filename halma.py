@@ -225,12 +225,14 @@ class Halma:
  h: help
  w: weight map
  t: treesearch
+ s: show moves of one depth
+ m: manual move
  b: best move (depth 1)'''
     print(Halma.Run.__doc__)
     i=0
     while True:
-      #k=getkey()
-      k='b'
+      k=getkey()
+      #k='s'
       if k=='x':   break
       elif k=='h': print(Halma.Run.__doc__)
       elif k=='b':#do best computer move depth=1
@@ -249,13 +251,76 @@ class Halma:
       elif k=='t':  #do best computer move depth=n
         self.SeekTreeMove(depth=3,reduce=3)
       elif k=='s':#show moves
-        skNd=self.SeekMoves(armyIdx=0)
-        self.EvalMoves(skNd)
-        self.ShowSeekNode(skNd)
+        armyIdx=0
+        self.SeekCalcConsts(armyIdx)
+        skArmy=np.zeros((1,),dtype=dtSeekArmy)[0]
+        self.SeekMoves(skArmy)
+        self.EvalMoves(skArmy)
+        self.ShowSeekArmy(skArmy)
       elif k=='w':#show weight map
         self.printBrd(0x5,self.weightMap[0,:,:])
         self.printBrd(0x5,self.distMap[0,:,:])
-        pass
+      elif k=='m':  #manual move
+        colBrd=np.ndarray(shape=self.board.shape,dtype=np.uint16)
+        colBrd[:]=self.board
+        cbd=colBrd.ravel()
+        #for i in range(numArmy):  # fill armies
+        #  army=armies[i,:]
+        #  armyLbl=armiesLbl[i]
+        #  bd[army]=armyLbl
+
+        while True:
+          armyIdx=0
+          self.SeekCalcConsts(armyIdx)
+          (bd,w,maxIdx,armyIdx,army,armyLbl)=self.skConst
+          skArmy=np.zeros((1,),dtype=dtSeekArmy)[0]
+          self.SeekMoves(skArmy)
+          self.EvalMoves(skArmy)
+          #self.ShowSeekArmy(skArmy)
+          numMv=skArmy['numMoves']
+          mvArr=skArmy['moves'][:numMv]
+          cbd[army]=armyLbl+(np.arange(1,1+army.shape[0])<<8)
+          self.printBrd(0x8,colBrd)
+          cbd[army]=armyLbl
+          print('%d possible moves. select man idx (enter to exit)'%numMv)
+          uManIdx=np.unique(mvArr['manIdx'])
+          print(uManIdx)
+          try:
+            manIdx=int(getkey())
+          except (ValueError,TypeError):
+            break
+          if not manIdx in uManIdx: break
+          numMv=skArmy['numMoves']
+          mvArr=skArmy['moves'][:numMv]
+          lst=np.nonzero(mvArr['manIdx']==manIdx)
+          #print(mvArr)
+          mvArr=mvArr[lst]
+          cbd[army[manIdx]]=armyLbl+0x10 #invert color
+          for i,v in enumerate(mvArr):
+            #cbr[v[1]]=armyLbl+((i+1)<<4)
+            cbd[v[1]]=((i+1)<<8) #display empty with a number
+            if i<10:
+              s=chr(ord('0')+i)
+            else:
+              s=chr(ord('a')-10+i)
+            print('%s: %3d %.4g'%(s,v[1],v[2]))
+          self.printBrd(0x8,colBrd)
+
+          try:
+            k=getkey()
+            if k<='9':
+              k=ord(k)-ord('0')
+            else:
+              k=ord(k)-ord('a')+10
+            mv=mvArr[k]
+          except IndexError:
+            break
+
+          manIdx=mv[0];dstPos=mv[1]
+          self.Move(army,manIdx,dstPos,verb=True)
+          colBrd[:]=self.board
+
+        print('exit manual mode')
 
   def SeekCalcConsts(self,armyIdx):
     board=self.board
@@ -360,13 +425,15 @@ class Halma:
       if verb: print(mvQ[k])
       self.Move(army,manIdx,srcPos)
 
-  def ShowSeekNode(self,skNd):
-    bd=skNd.bd;mv=skNd.mv;mvQ=skNd.mvQ;armyIdx=skNd.armyIdx
+  def ShowSeekArmy(self,skArmy):
+    (bd,w,maxIdx,armyIdx,army,armyLbl)=self.skConst
+    mvArr=skArmy['moves']
+    numMv=skArmy['numMoves']
+    #print(mvArr)
+    for i in range(numMv):
+      print('%d %3d %.4g'%tuple(mvArr[i]))
     verb=self.verbose&0x08
-    army=skNd.army
-    numMv=mv.shape[0]
     print('%d moves'%numMv)
-    print(np.vstack((mv.T,mvQ.T)))
 
   def Move(self,army,manIdx,dstPos,board=None,verb=False):
     if board is None: board=self.board
@@ -381,6 +448,11 @@ class Halma:
     return srcPos
 
   def printBrd(self,mode,board=None):
+    # mode
+    # 0x01: raw
+    # 0x02: display all players
+    # 0x04: display as float values (0 value= out of board)
+    # 0x08: display man idx of player
     if board is None:
       board=self.board
     if mode&1:
@@ -414,6 +486,63 @@ class Halma:
           else: ss+='%6.5g'%(k)
           #else: ss+='+%4.3g-'%(k*10.123)
         print(ss[ofsS:ofsE])
+    if mode&8:
+      #0 empty
+      #1..6 man of the army '*' in color
+      #7 out of board
+      #(k>>4) > plot this as a number 0..9..a..z
+      #https://www.lihaoyi.com/post/BuildyourownCommandLinewithANSIescapecodes.html#8-colors
+      #Black: \u001b[30m
+      #Red: \u001b[31m
+      #Green: \u001b[32m
+      #Yellow: \u001b[33m
+      #Blue: \u001b[34m
+      #Magenta: \u001b[35m
+      #Cyan: \u001b[36m
+      #White: \u001b[37m
+      #Bright Black: \u001b[30;1m
+      #Bright Red: \u001b[31;1m
+      #Bright Green: \u001b[32;1m
+      #Bright Yellow: \u001b[33;1m
+      #Bright Blue: \u001b[34;1m
+      #Bright Magenta: \u001b[35;1m
+      #Bright Cyan: \u001b[36;1m
+      #Bright White: \u001b[37;1m
+      #Reset: \u001b[0m
+
+      #COL={'RESET':'\033[0m','r':'\033[1;31m'}
+      #print(COL['WARN'])
+      COL=('\033[0m', '\033[31m'  ,'\033[32m'  ,'\033[33m'  ,'\033[34m'  ,'\033[35m'  ,'\033[36m'  ,
+           '\033[38;5;226m','\033[32;7m','\033[33;7m','\033[34m;7','\033[35;7m','\033[36;7m',)
+
+      s=board.shape
+      sz=self.size
+      w=sz*4
+      ofsS=sz*3*1
+      for j in range(s[0]):
+        ss = ' '*(w-j)
+        soob=True#start out of board
+        for i in range(s[1]):
+          k=board[j,i]
+          if k==7:
+            if soob: ss+='  ';continue#'+-'
+            else: break
+          else:
+            soob=False
+          if k==0: ss+=COL[k]+' .'#'cd'
+          #else: ss+='%2.x'%k
+          else:
+            col=k&0xf # 1..6 for armies
+            if k&0x10:
+              col+=6 #take inverted colors
+            c=k>>8;
+            if c==0: c='*'
+            elif c<=0xa: c=chr(ord('0')+c-1)
+            else:        c=chr(ord('a')+c-1-0xa)
+            ss+=COL[col]+' '+c
+        #print(ss[ofsS:ofsE])
+        print(ss[ofsS:])
+
 
   def RunSeekTree(self, depth=3, reduce=3):
     #depth= search deph levels
@@ -449,6 +578,7 @@ if __name__ == '__main__':
 
   def getkey():
     k=sys.stdin.read(1)
+    sys.stdout.write('\n')
     return k[0]
 
   def main():

@@ -130,23 +130,31 @@ class Halma:
     usedIdx=np.nonzero(bd!=7)
     shape=(self.armiesLbl.size,)+bd.shape
     self.weightMap=wms=np.ndarray(shape=shape,dtype=np.float)
-    wms[:]=0
+    self.distMap=dms=np.ndarray(shape=shape,dtype=np.uint8)
+    wms[:]=0;dms[:]=0
     w=shape[1]
 
+    o=np.ones(w,dtype=np.float)
     a=np.arange(w,dtype=np.float)+1
+    dm2d=np.asarray(np.mat(a).T*np.mat(o))
+
     #inverse progressive distance to goal
     a=(a+a[::-1].cumsum()/4)
     a/=a[0]
-    o=np.ones(w,dtype=np.float)
     wm2d=np.asarray(np.mat(a).T*np.mat(o))
     #penalize non central
     nctr=np.fromfunction(lambda y,x:np.abs(2*(x-sz)-y),(w,w),dtype=int)
-    wm2d-=nctr*.3
+    wm2d-=nctr*.3 #.25 seems better but cant finish without prediction
+
+
 
     wm1d=wm2d[usedIdx]
+    dm1d=dm2d[usedIdx]
 
     #testing ascending weight array
     #wm1d=np.arange(1,usedIdx[0].size+1)
+    #tweak some values:
+    wm1d[104]=wm1d[102]
 
     #-------- setting up sort arrays --------
     itlx=np.arange(w*w,dtype=int).reshape(w,w)
@@ -168,22 +176,66 @@ class Halma:
     #wm[usedIdx]=wm1d[np.argsort(ibry[usedIdx])];self.printBrd(0x5,wm)#-3
     for idx,lbl in enumerate(self.armiesLbl):
       wm=wms[idx,:,:]
+      dm=dms[idx,:,:]
       if lbl==1:
         wm[usedIdx]=wm1d[np.argsort(itlx[usedIdx])]#1
+        dm[usedIdx]=dm1d[np.argsort(itlx[usedIdx])]#1
       elif lbl==2:
         wm[usedIdx]=wm1d[np.argsort(ibly[usedIdx])]
+        dm[usedIdx]=dm1d[np.argsort(ibly[usedIdx])]
       elif lbl==3:
         wm[usedIdx]=wm1d[np.argsort(ibry[usedIdx])]
+        dm[usedIdx]=dm1d[np.argsort(ibry[usedIdx])]
       elif lbl==4:
         wm[usedIdx]=wm1d[np.argsort(iblx[usedIdx])]#4
+        dm[usedIdx]=dm1d[np.argsort(iblx[usedIdx])]#4
       elif lbl==5:
         wm[usedIdx]=wm1d[np.argsort(itry[usedIdx])]#5
+        dm[usedIdx]=dm1d[np.argsort(itry[usedIdx])]#5
       elif lbl==6:
         wm[usedIdx]=wm1d[np.argsort(itly[usedIdx])]#6
+        dm[usedIdx]=dm1d[np.argsort(itly[usedIdx])]#6
       #wm[:,:].ravel()[oobIdx]=0
-      if verb&0x02: self.printBrd(0x5,wms[idx,:,:])
+      if verb&0x02:
+        self.printBrd(0x5,wms[idx,:,:])
+        self.printBrd(0x5,dms[idx,:,:])
       #print(lbl)
       #1
+
+  def Run(self):
+    '''press:
+ x: quit
+ h: help
+ w: weight map
+ t: treesearch
+ b: best move (depth 1)'''
+    print(Halma.Run.__doc__)
+    i=0
+    while True:
+      k=getkey()
+      if k=='x':   break
+      elif k=='h': print(Halma.Run.__doc__)
+      elif k=='b':#do best computer move depth=1
+        skNd=self.SeekMoves(armyIdx=0)
+        self.EvalMoves(skNd)
+        q=self.ExecBestMove(skNd) #quality
+        posSum=self.distMap[0].ravel()[self.armies[0]].sum() #positional sum
+        print('move %d quality:%g, posSum: %d, press key'%(i,q,posSum))
+        if posSum==150:
+          print('Finished!, press key')
+          break
+        i+=1
+      elif k=='t':  #do best computer move depth=n
+        self.SeekTreeMove(depth=3,reduce=3)
+      elif k=='s':#show moves
+        skNd=self.SeekMoves(armyIdx=0)
+        self.EvalMoves(skNd)
+        self.ShowSeekNode(skNd)
+      elif k=='w':#show weight map
+        self.printBrd(0x5,self.weightMap[0,:,:])
+        self.printBrd(0x5,self.distMap[0,:,:])
+        pass
+
 
   class SeekNode:
     def __init__(self,halma,armyIdx):
@@ -261,6 +313,7 @@ class Halma:
     best=np.argmax(mvQ)
     manIdx,dspPos=mv[best,:]
     self.Move(army,manIdx,dspPos,verb=True)
+    return mvQ[best]
 
   @staticmethod
   def SeekLongMoves(seek,man,pcur,i):
@@ -289,13 +342,15 @@ class Halma:
     #print('%d moves'%numMv)
     #print(mv.T)
     wm=self.weightMap[armyIdx].ravel()
+    dm=self.distMap[armyIdx].ravel()
     for k in range(numMv):
       manIdx,dspPos=mv[k,:]
       srcPos=self.Move(army,manIdx,dspPos,verb=verb)
       mvQ[k]=wm[army].sum()
-      maxDiff=np.diff(np.sort(army)).max()/seek.w
-      if maxDiff>2.5:
-        mvQ[k]-=maxDiff
+      #maxDiff=np.diff(np.sort(army)).max()/seek.w
+      maxDiff=np.diff(np.sort(dm[army])).max()
+      if maxDiff>2:
+        mvQ[k]-=maxDiff*1.
       if verb: print(mvQ[k])
       self.Move(army,manIdx,srcPos)
 
@@ -357,8 +412,9 @@ class Halma:
   def RunSeekTree(self, depth=3, reduce=3):
     #depth= search deph levels
     #reduce = maximal children per node
-    #skNd=self.SeekMoves(armyIdx=0)
-    #self.EvalMoves(skNd)
+    skNd=self.SeekMoves(armyIdx=0)
+    self.EvalMoves(skNd)
+
     #self
     #SeekTreeMove(self,skNdParent,depth=3,reduce=3)
     pass
@@ -405,22 +461,5 @@ if __name__ == '__main__':
     halma.Init([1,])
     #srcPos=halma.Move(halma.armies[0],0,17*5+6,verb=True)
     print('Initialization done, press key')
-    i=0
-    while True:
-      k=getkey()
-      if k=='x':break
-      elif k=='b':#do best computer move depth=1
-        skNd=halma.SeekMoves(armyIdx=0)
-        halma.EvalMoves(skNd)
-        halma.ExecBestMove(skNd)
-        print('move %d, press key'%i)
-        i+=1
-      elif k=='t':  #do best computer move depth=n
-        halma.SeekTreeMove(depth=3,reduce=3)
-      elif k=='s':#show moves
-        skNd=halma.SeekMoves(armyIdx=0)
-        halma.EvalMoves(skNd)
-        halma.ShowSeekNode(skNd)
-      elif k=='w':#show weight map
-        pass
+    halma.Run()
   main()

@@ -43,37 +43,20 @@ _log=logging.getLogger(__name__)
 if __name__ == '__main__':
   logging.basicConfig(level=logging.DEBUG,format='%(levelname)s:%(module)s:%(lineno)d:%(funcName)s:%(message)s ')
 
+#define global types also for C-interfacing
+class ctInfo(ct.Structure):
+  _fields_=[('armies',     ct.POINTER(ct.c_uint16)),
+            ('armiesLbl',  ct.POINTER(ct.c_uint8)),
+            ('numArmies',  ct.c_uint8),
+            ('lenArmy',    ct.c_uint8),
+            ('board',      ct.POINTER(ct.c_uint8)),
+            ('weightmaps', ct.POINTER(ct.c_float)),
+            ('distmap',    ct.POINTER(ct.c_uint8)),
+            ('w',          ct.c_uint8)]
 
-#C-types array structures for searching tree
-#--------------------------------------------
-#https://stackoverflow.com/questions/40063080/casting-an-array-of-c-structs-to-a-numpy-array
-#https://numpy.org/doc/stable/user/basics.rec.html
-#https://numpy.org/doc/stable/reference/generated/numpy.ndarray.ctypes.html?highlight=ctypes#numpy.ndarray.ctypes
->>> class POINT(Structure):
-...     _fields_ = [("x", c_int),
-...                 ("y", c_int)]
-.
-
-
-class InfoC(ct.Structure):
-     _fields_ = [('armies',     ct.POINTER(ct.c_uint16)),
-     _fields_ = [('armiesLbl',  ct.POINTER(ct.c_uint8)),
-     _fields_ = [('numArmies',  ct.c_uint8),
-     _fields_ = [('lenArmy',    ct.c_uint8),
-     _fields_ = [('board',      ct.POINTER(ct.c_uint8)),
-     _fields_ = [('weightmaps', ct.POINTER(ct.c_float)),
-     _fields_ = [('distmap',    ct.POINTER(ct.c_uint8)),
-     _fields_ = [('w',          ct.uint8)]
-
-
-tSeekManC=np.dtype([('manIdx',np.uint8),('dstPos',np.uint16),('quality',np.float)],align=True)
-tSeekArmyC=np.dtype([('armyIdx',np.uint8),('moves',tSeekManC, (128,)),('lenUsedMoves',np.uint8)],align=True)
-SeekTreeC=np.dtype([('bestQuality',np.float),('bestIdx',np.uint8)],align=True)
-#x=np.array([(2,3,4)],dtype=tSeekManC)
-#np.ndarray(shape=(1,),dtype=tSeekArmyC)
-#np.empty(shape=(1,),dtype=tSeekArmyC)
-#np.zeros(shape=(1,),dtype=tSeekArmyC)
-
+dtSeekMan=np.dtype([('manIdx',np.uint8),('dstPos',np.uint16),('quality',np.float)],align=True)
+dtSeekArmy=np.dtype([('armyIdx',np.uint8),('moves',dtSeekMan, (128,)),('numMoves',np.uint8)],align=True)
+dtSeekTree=np.dtype([('bestQuality',np.float),('bestIdx',np.uint8)],align=True)
 
 
 
@@ -246,13 +229,17 @@ class Halma:
     print(Halma.Run.__doc__)
     i=0
     while True:
-      k=getkey()
+      #k=getkey()
+      k='b'
       if k=='x':   break
       elif k=='h': print(Halma.Run.__doc__)
       elif k=='b':#do best computer move depth=1
-        skNd=self.SeekMoves(armyIdx=0)
-        self.EvalMoves(skNd)
-        q=self.ExecBestMove(skNd) #quality
+        armyIdx=0
+        self.SeekCalcConsts(armyIdx)
+        skArmy=np.zeros((1,),dtype=dtSeekArmy)[0]
+        self.SeekMoves(skArmy)
+        self.EvalMoves(skArmy)
+        q=self.ExecBestMove(skArmy) #quality
         posSum=self.distMap[0].ravel()[self.armies[0]].sum() #positional sum
         print('move %d quality:%g, posSum: %d, press key'%(i,q,posSum))
         if posSum==150:
@@ -270,46 +257,27 @@ class Halma:
         self.printBrd(0x5,self.distMap[0,:,:])
         pass
 
+  def SeekCalcConsts(self,armyIdx):
+    board=self.board
+    w=board.shape[0]
+    bd=board.ravel()
+    maxIdx=w*w
+    armyIdx=armyIdx
+    army=self.armies[armyIdx,:]
+    armyLbl=armyLbl=self.armiesLbl[armyIdx]
+    self.skConst=(bd,w,maxIdx,armyIdx,army,armyLbl)
 
-  class SeekNode:
-    def __init__(self,halma,armyIdx):
-      #---constants of whole seek---
-      board=halma.board
-      self.w=w=board.shape[0]
-      self.bd=bd=board.ravel()
-      self.maxIdx=w*w
-      l=bd.size
-      #---node moves and quality---
-      #mv is the possible moves array (manIdx, finamlBrdIdx)
-      #mvQ is the quality evaluation of the move
-      self.armyIdx=armyIdx
-      self.army=halma.armies[armyIdx,:]
-      self.armyLbl=armyLbl=halma.armiesLbl[armyIdx]
-
-      self._mvRaw=mv=np.ndarray(shape=(l,2),dtype=np.uint16)  # allocate hopefully big enough array
-      self._mvRawQ=mvQ=np.ndarray(shape=(l),dtype=np.float)  # allocate hopefully big enough array
-      #_mvRaw,_mvRawQ is the whole array mv,mvQ is a view that is resized
-      mv[:]=0  #for debug
-      mvQ[:]=0  #for debug
-      #'bd' is the board on which moves are seeked
-      #'mv' are the available move list
-
-  def SeekMoves(self,armyIdx,board=None):
+  def SeekMoves(self,skArmy):
+    #seeks all available moves of an army on the current board and stores the moves in skArmy
     verb=self.verbose
-    if board is None: board=self.board
     # a b
     # c . d
     #   e f
     #Possible short moves:  =a=-18   b=-17   c=-1   d=+1   e=+17   f=+18
     #Possible jump moves:   =a=-2*18 b=-2*17 c=-1*2 d=+1*2 e=+17*2 f=+18*2
     i=0
-    skNd=Halma.SeekNode(self,armyIdx)
-    skArmy=np.zeros((1,),tSeekArmyC)
-    #skArmy[0]['armyIdx']; x=skArmy[0]; x['armyIdx']; x.dtype
-
-    w=skNd.w;maxIdx=skNd.maxIdx;bd=skNd.bd;mv=skNd._mvRaw
-    armyLbl=skNd.armyLbl;army=skNd.army
-    #armyLbl=bd[self.army[0]]
+    (bd,w,maxIdx,armyIdx,army,armyLbl)=self.skConst
+    mv=skArmy['moves']
     #for man in army:
     for manIdx,man in enumerate(army):
       #TODO:resize moves if needed
@@ -317,77 +285,78 @@ class Halma:
       js=i
       #short moves:
       p=man-w-1
-      if p>0 and not bd[p]: mv[i,:]=(manIdx,p);i+=1
+      if p>0 and not bd[p]: mv[i][0]=manIdx;mv[i][1]=p;i+=1
       p=man-w
-      if p>0 and not bd[p]: mv[i,:]=(manIdx,p);i+=1
+      if p>0 and not bd[p]: mv[i][0]=manIdx;mv[i][1]=p;i+=1
       p=man-1
-      if p>0 and not bd[p]: mv[i,:]=(manIdx,p);i+=1
+      if p>0 and not bd[p]: mv[i][0]=manIdx;mv[i][1]=p;i+=1
       p=man+1
-      if p<maxIdx and not bd[p]: mv[i,:]=(manIdx,p);i+=1
+      if p<maxIdx and not bd[p]: mv[i][0]=manIdx;mv[i][1]=p;i+=1
       p=man+w
-      if p<maxIdx and not bd[p]: mv[i,:]=(manIdx,p);i+=1
+      if p<maxIdx and not bd[p]: mv[i][0]=manIdx;mv[i][1]=p;i+=1
       p=man+w+1
-      if p<maxIdx and not bd[p]: mv[i,:]=(manIdx,p);i+=1
+      if p<maxIdx and not bd[p]: mv[i][0]=manIdx;mv[i][1]=p;i+=1
       #long mv:
       jl=i
-      skNd.manIdx=manIdx
-      i=Halma.SeekLongMoves(skNd, man, man, i)
-
+      i=Halma.SeekLongMoves(skArmy,bd,w,manIdx,maxIdx,mv,man,man,i)
       if i>js:
         if verb&0x04 and i>js:
           print('%d short %d long moves'%(jl-js,i-jl))
-          print(mv[js:i,:].T)
-          bd[mv[js:jl,1]]=0xa
+          print(mv[js:i].T)
+          bd[mv[js:jl]['dstPos']]=0xa
           self.printBrd(0x2)
-        bd[mv[js:i,1]]=0
+        bd[mv[js:i]['dstPos']]=0
       bd[man]=armyLbl
-    skNd.mv=skNd._mvRaw[:i,:]# view of _mvRaw object with correct size
-    skNd.mvQ=skNd._mvRawQ[:i]# view of _mvRawQ object with correct size
-    return skNd
+    skArmy['numMoves']=i
 
-  def ExecBestMove(self,skNd):
-    mv=skNd.mv;mvQ=skNd.mvQ;army=skNd.army
+  def ExecBestMove(self,skArmy):
+    (bd,w,maxIdx,armyIdx,army,armyLbl)=self.skConst
+    mvArr=skArmy['moves']
+    numMv=skArmy['numMoves']
+    mvQ=mvArr['quality']
     best=np.argmax(mvQ)
-    manIdx,dspPos=mv[best,:]
-    self.Move(army,manIdx,dspPos,verb=True)
+    mv=mvArr[best]
+    manIdx=mv[0];dstPos=mv[1]
+    self.Move(army,manIdx,dstPos,verb=True)
     return mvQ[best]
 
   @staticmethod
-  def SeekLongMoves(seek,man,pcur,i):
-    w=seek.w;maxIdx=seek.maxIdx;bd=seek.bd;mv=seek._mvRaw;manIdx=seek.manIdx
+  def SeekLongMoves(skArmy,bd,w,manIdx,maxIdx,mv,man,pcur,i):
     w2=2*w
     #TODO:resize mv if needed
     p1=pcur-w-1; p2=pcur-w2-2
-    if p2>0 and bd[p1]>0 and bd[p1]<=6 and not bd[p2]: mv[i,:]=(manIdx,p2);bd[p2]=8;i=Halma.SeekLongMoves(seek,man,p2,i+1)
+    if p2>0 and bd[p1]>0 and bd[p1]<=6 and not bd[p2]: mv[i][0]=manIdx;mv[i][1]=p2;bd[p2]=8;i=Halma.SeekLongMoves(skArmy,bd,w,manIdx,maxIdx,mv,man,p2,i+1)
     p1=pcur-w  ; p2=pcur-w2
-    if p2>0 and bd[p1]>0 and bd[p1]<=6 and not bd[p2]: mv[i,:]=(manIdx,p2);bd[p2]=8;i=Halma.SeekLongMoves(seek,man,p2,i+1)
+    if p2>0 and bd[p1]>0 and bd[p1]<=6 and not bd[p2]: mv[i][0]=manIdx;mv[i][1]=p2;bd[p2]=8;i=Halma.SeekLongMoves(skArmy,bd,w,manIdx,maxIdx,mv,man,p2,i+1)
     p1=pcur-1  ; p2=pcur-2
-    if p2>0 and bd[p1]>0 and bd[p1]<=6 and not bd[p2]: mv[i,:]=(manIdx,p2);bd[p2]=8;i=Halma.SeekLongMoves(seek,man,p2,i+1)
+    if p2>0 and bd[p1]>0 and bd[p1]<=6 and not bd[p2]: mv[i][0]=manIdx;mv[i][1]=p2;bd[p2]=8;i=Halma.SeekLongMoves(skArmy,bd,w,manIdx,maxIdx,mv,man,p2,i+1)
     p1=pcur+1  ; p2=pcur+2
-    if p2<maxIdx and bd[p1]>0 and bd[p1]<=6 and not bd[p2]: mv[i,:]=(manIdx,p2);bd[p2]=8;i=Halma.SeekLongMoves(seek,man,p2,i+1)
+    if p2<maxIdx and bd[p1]>0 and bd[p1]<=6 and not bd[p2]: mv[i][0]=manIdx;mv[i][1]=p2;bd[p2]=8;i=Halma.SeekLongMoves(skArmy,bd,w,manIdx,maxIdx,mv,man,p2,i+1)
     p1=pcur+w  ; p2=pcur+w2
-    if p2<maxIdx and bd[p1]>0 and bd[p1]<=6 and not bd[p2]: mv[i,:]=(manIdx,p2);bd[p2]=8;i=Halma.SeekLongMoves(seek,man,p2,i+1)
+    if p2<maxIdx and bd[p1]>0 and bd[p1]<=6 and not bd[p2]: mv[i][0]=manIdx;mv[i][1]=p2;bd[p2]=8;i=Halma.SeekLongMoves(skArmy,bd,w,manIdx,maxIdx,mv,man,p2,i+1)
     p1=pcur+w+1; p2=pcur+w2+2
-    if p2<maxIdx and bd[p1]>0 and bd[p1]<=6 and not bd[p2]: mv[i,:]=(manIdx,p2);bd[p2]=8;i=Halma.SeekLongMoves(seek,man,p2,i+1)
+    if p2<maxIdx and bd[p1]>0 and bd[p1]<=6 and not bd[p2]: mv[i][0]=manIdx;mv[i][1]=p2;bd[p2]=8;i=Halma.SeekLongMoves(skArmy,bd,w,manIdx,maxIdx,mv,man,p2,i+1)
     return i
 
-  def EvalMoves(self,seek):
-    bd=seek.bd;mv=seek.mv;mvQ=seek.mvQ;armyIdx=seek.armyIdx
+  def EvalMoves(self,skArmy):
+    (bd,w,maxIdx,armyIdx,army,armyLbl)=self.skConst
+    mvArr=skArmy['moves']
+    numMv=skArmy['numMoves']
     verb=self.verbose&0x08
-    army=seek.army
-    numMv=mv.shape[0]
     #print('%d moves'%numMv)
     #print(mv.T)
     wm=self.weightMap[armyIdx].ravel()
     dm=self.distMap[armyIdx].ravel()
     for k in range(numMv):
-      manIdx,dspPos=mv[k,:]
-      srcPos=self.Move(army,manIdx,dspPos,verb=verb)
-      mvQ[k]=wm[army].sum()
+      mv=mvArr[k]
+      manIdx=mv[0];dstPos=mv[1]
+      srcPos=self.Move(army,manIdx,dstPos,verb=verb)
+      mvQ=wm[army].sum()
       #maxDiff=np.diff(np.sort(army)).max()/seek.w
       maxDiff=np.diff(np.sort(dm[army])).max()
       if maxDiff>2:
-        mvQ[k]-=maxDiff*1.
+        mvQ-=maxDiff*1.
+      mv[2]=mvQ
       if verb: print(mvQ[k])
       self.Move(army,manIdx,srcPos)
 
@@ -399,14 +368,14 @@ class Halma:
     print('%d moves'%numMv)
     print(np.vstack((mv.T,mvQ.T)))
 
-  def Move(self,army,manIdx,dspPos,board=None,verb=False):
+  def Move(self,army,manIdx,dstPos,board=None,verb=False):
     if board is None: board=self.board
     bd=board.ravel()
     srcPos=army[manIdx]
     lbl=bd[srcPos]
     bd[srcPos]=0
-    army[manIdx]=dspPos
-    bd[dspPos]=lbl
+    army[manIdx]=dstPos
+    bd[dstPos]=lbl
     if verb:
       self.printBrd(0x2)#0x03
     return srcPos

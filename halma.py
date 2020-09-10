@@ -24,7 +24,7 @@ verbose bits
  0x002 : weight map
  0x004 : show all possible moves Halma.SeekMoves()
  0x008 : show moves quality in  Halma.EvalMoves()
- 0x010 :
+ 0x010 : debug SeekTreeRoot
  0x020 :
  0x040 :
  0x080 :
@@ -219,6 +219,14 @@ class Halma:
       #print(lbl)
       #1
 
+  def PlaceArmy(self, armyLbl, army):
+    brd=self.board.ravel()
+    brd[np.nonzero(brd==armyLbl)]=0
+    armyIdx=np.nonzero(self.armiesLbl==armyLbl)[0][0]
+    brd[army]=armyLbl
+    self.armies[armyIdx,:]=army
+
+
   def Run(self):
     '''press:
  x: quit
@@ -228,8 +236,11 @@ class Halma:
  s: show moves of one depth
  m: manual move
  b: best move (depth 1)'''
+
+    #self.PlaceArmy(1,[110, 91, 22, 38, 39,108, 73, 92, 57, 58])
+    #self.printBrd(0x2,)
     print(Halma.Run.__doc__)
-    i=0
+    mvCnt=0
     while True:
       k=getkey()
       #k='s'
@@ -238,18 +249,27 @@ class Halma:
       elif k=='b':#do best computer move depth=1
         armyIdx=0
         self.SeekCalcConsts(armyIdx)
+        (bd,w,maxIdx,armyIdx,army,armyLbl)=self.skConst
         skArmy=np.zeros((1,),dtype=dtSeekArmy)[0]
         self.SeekMoves(skArmy)
         self.EvalMoves(skArmy)
         q=self.ExecBestMove(skArmy) #quality
         posSum=self.distMap[0].ravel()[self.armies[0]].sum() #positional sum
-        print('move %d quality:%g, posSum: %d, press key'%(i,q,posSum))
+        self.quality=(q,posSum);mvCnt+=1
+        print('move %d quality:%g, posSum: %d, press key'%(mvCnt,q,posSum))
+        print(army)
         if posSum==150:
           print('Finished!, press key')
           break
-        i+=1
       elif k=='t':  #do best computer move depth=n
-        self.SeekTreeMove(depth=3,reduce=3)
+        armyIdx=0
+        self.SeekCalcConsts(armyIdx)
+        (bd,w,maxIdx,armyIdx,army,armyLbl)=self.skConst
+        q=self.SeekTreeRoot(depth=1,reduce=3)
+        posSum=self.distMap[0].ravel()[self.armies[0]].sum() #positional sum
+        self.quality=(q,posSum);mvCnt+=1
+        print('move %d quality:%g, posSum: %d, press key'%(mvCnt,q,posSum))
+        print(army)
       elif k=='s':#show moves
         armyIdx=0
         self.SeekCalcConsts(armyIdx)
@@ -316,9 +336,14 @@ class Halma:
           except IndexError:
             break
 
-          manIdx=mv[0];dstPos=mv[1]
+          manIdx=mv[0];dstPos=mv[1];q=mv[2]
           self.Move(army,manIdx,dstPos,verb=True)
           colBrd[:]=self.board
+          posSum = self.distMap[0].ravel()[self.armies[0]].sum()  # positional sum
+          self.quality = (q, posSum);
+          mvCnt += 1
+          print('move %d quality:%g, posSum: %d, press key' % (mvCnt, q, posSum))
+          print(army)
 
         print('exit manual mode')
 
@@ -424,6 +449,18 @@ class Halma:
       mv[2]=mvQ
       if verb: print(mvQ[k])
       self.Move(army,manIdx,srcPos)
+
+  def ReduceMoves(self,skArmy,depth):
+    n=skArmy['numMoves']
+    mv=skArmy['moves'][:n]
+    if n>20:
+      qSrt=np.argsort(mv['quality'])
+      sel=qSrt[-20:]
+    else:
+      sel=np.arange(n,dtype=np.uint8)
+    return sel
+
+    #  skArmy['numMoves']=3
 
   def ShowSeekArmy(self,skArmy):
     (bd,w,maxIdx,armyIdx,army,armyLbl)=self.skConst
@@ -541,24 +578,80 @@ class Halma:
             else:        c=chr(ord('a')+c-1-0xa)
             ss+=COL[col]+' '+c
         #print(ss[ofsS:ofsE])
-        print(ss[ofsS:])
+        print(ss[ofsS:]+COL[0])
 
 
-  def RunSeekTree(self, depth=3, reduce=3):
+  def SeekTreeRoot(self, depth=2, reduce=3):
     #depth= search deph levels
     #reduce = maximal children per node
-    skNd=self.SeekMoves(armyIdx=0)
-    self.EvalMoves(skNd)
+    (bd,w,maxIdx,armyIdx,army,armyLbl)=self.skConst
+    self.bestTreeMove=0.
+    self.treeMoves=[] #for debug
+    skArmy=np.zeros((1,),dtype=dtSeekArmy)[0]
+    self.SeekMoves(skArmy)
+    self.EvalMoves(skArmy)
+    sel=self.ReduceMoves(skArmy,depth)
 
-    #self
-    #SeekTreeMove(self,skNdParent,depth=3,reduce=3)
-    pass
+    numMv=skArmy['numMoves']
+    mvArr=skArmy['moves'][:numMv]
+    print('%d moves'%numMv)
+    #for k in range(numMv):
+    for k in sel:
+      mv=mvArr[k]
+      manIdx=mv[0];dstPos=mv[1]
+      srcPos=self.Move(army,manIdx,dstPos)
+      #self.treeMoves.append(tuple(mv))
+      self.SeekTree(k,depth)
+      #self.treeMoves.pop()
+      srcPos=self.Move(army,manIdx,srcPos)
 
-  def SeekTreeMove(self, skNdParent, depth=3, reduce=3):
+    mv=mvArr[self.bestIdx]
+    manIdx=mv[0];dstPos=mv[1]
+    print ('SeekTreeRoot %d, %g'%(self.bestIdx, self.bestTreeMove,))
+    self.Move(army,manIdx,dstPos,verb=True)
+    return mv['quality']
+
+  def SeekTree(self, rootMvIdx, depth):
     #depth= search deph levels
     #reduce = maximal children per node
-    skNd=self.SeekMoves(armyIdx=0)
-    self.EvalMoves(skNd)
+    #print(depth)
+    (bd,w,maxIdx,armyIdx,army,armyLbl)=self.skConst
+    skArmy=np.zeros((1,),dtype=dtSeekArmy)[0]
+    self.SeekMoves(skArmy)
+    self.EvalMoves(skArmy)
+    sel=self.ReduceMoves(skArmy,depth)
+
+    numMv=skArmy['numMoves']
+    mvArr=skArmy['moves'][:numMv]
+    qArr=mvArr['quality']
+    #for mvIdx in range(numMv):
+    for mvIdx in sel:
+      try:
+        q=qArr[mvIdx]
+      except IndexError:
+        1
+      q=qArr[mvIdx]
+      if q>self.bestTreeMove:
+        self.bestTreeMove=q
+        self.bestIdx=rootMvIdx
+        mv=mvArr[mvIdx]
+        #self.treeMoves.append(tuple(mv))
+        #print('rootMvIdx:%d mvIdx:%d depth:%d quality:%g'%(rootMvIdx,mvIdx,depth,q,))
+        #print(self.treeMoves)
+        #self.treeMoves.pop()
+        #print(army,mvArr)
+
+    if depth>0: # and not winning move found
+      #for mvIdx in range(numMv):
+      for mvIdx in sel:
+        mv=mvArr[mvIdx]
+        manIdx=mv[0]
+        dstPos=mv[1]
+        srcPos=self.Move(army,manIdx,dstPos)
+        self.treeMoves.append(tuple(mv))
+        self.SeekTree(rootMvIdx,depth-1)
+        self.treeMoves.pop()
+        self.Move(army,manIdx,srcPos)
 
     pass
 

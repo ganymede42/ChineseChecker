@@ -62,7 +62,6 @@ print(u"\u001b[34;1m E \u001b[35;1m F \u001b[36;1m G \u001b[37;1m H \u001b[0m")
 
 for i in range(0, 16):
   print('\u001b[;%dm Decoration %d\u001b[0m'%(i,i))
-  print("")
 
 import sys
 for i in range(0, 16):

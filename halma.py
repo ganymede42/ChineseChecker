@@ -83,7 +83,7 @@ class Halma:
     self.board=self.emptyboard()
     self.InitArmies(armyLbl)
     self.InitWeightMap()
-    if verb&0x01: self.printBrd(0x3)
+    if verb&0x01: self.printBrd(0x1b)#(0x3)
 
   def emptyboard(self,board=None):
     sz=self.size
@@ -226,6 +226,12 @@ class Halma:
     brd[army]=armyLbl
     self.armies[armyIdx,:]=army
 
+  def Next(self,armyIdx,moveIdx):
+    armyIdx+=1
+    if armyIdx==self.armies.shape[0]:
+      armyIdx=0
+      moveIdx+=1
+    return armyIdx,moveIdx
 
   def Run(self):
     '''press:
@@ -241,14 +247,13 @@ class Halma:
     #self.PlaceArmy(1,[231,250,266,232,213,284,267,233,196,248])
     #self.printBrd(0x2,)
     print(Halma.Run.__doc__)
-    mvCnt=0
+    armyIdx,moveIdx=(0,1)
     while True:
       k=getkey()
       #k='s'
       if k=='x':   break
       elif k=='h': print(Halma.Run.__doc__)
       elif k=='b':#do best computer move depth=1
-        armyIdx=0
         self.SeekCalcConsts(armyIdx)
         (bd,w,maxIdx,armyIdx,army,armyLbl)=self.skConst
         skArmy=np.zeros((1,),dtype=dtSeekArmy)[0]
@@ -256,23 +261,23 @@ class Halma:
         self.EvalMoves(skArmy)
         q=self.ExecBestMove(skArmy) #quality
         posSum=self.distMap[0].ravel()[self.armies[0]].sum() #positional sum
-        self.quality=(q,posSum);mvCnt+=1
-        print('move %d quality:%g, posSum: %d, press key'%(mvCnt,q,posSum))
+        self.quality=(q,posSum)
+        print('move %d quality:%g, posSum: %d, press key'%(moveIdx,q,posSum))
         print(army)
+        armyIdx,moveIdx=self.Next(armyIdx,moveIdx)
         if posSum==150:
           print('Finished!, press key')
           break
       elif k=='t':  #do best computer move depth=n
-        armyIdx=0
         self.SeekCalcConsts(armyIdx)
         (bd,w,maxIdx,armyIdx,army,armyLbl)=self.skConst
         q=self.SeekTreeRoot(depth=1)
         posSum=self.distMap[0].ravel()[self.armies[0]].sum() #positional sum
-        self.quality=(q,posSum);mvCnt+=1
-        print('move %d quality:%g, posSum: %d, press key'%(mvCnt,q,posSum))
+        self.quality=(q,posSum)
+        print('move %d quality:%g, posSum: %d, press key'%(moveIdx,q,posSum))
         print(army)
+        armyIdx,moveIdx=self.Next(armyIdx,moveIdx)
       elif k=='s':#show moves
-        armyIdx=0
         self.SeekCalcConsts(armyIdx)
         skArmy=np.zeros((1,),dtype=dtSeekArmy)[0]
         self.SeekMoves(skArmy)
@@ -289,9 +294,7 @@ class Halma:
         #  army=armies[i,:]
         #  armyLbl=armiesLbl[i]
         #  bd[army]=armyLbl
-
         while True:
-          armyIdx=0
           self.SeekCalcConsts(armyIdx)
           (bd,w,maxIdx,armyIdx,army,armyLbl)=self.skConst
           skArmy=np.zeros((1,),dtype=dtSeekArmy)[0]
@@ -342,9 +345,9 @@ class Halma:
           colBrd[:]=self.board
           posSum = self.distMap[0].ravel()[self.armies[0]].sum()  # positional sum
           self.quality = (q, posSum);
-          mvCnt += 1
-          print('move %d quality:%g, posSum: %d, press key' % (mvCnt, q, posSum))
+          print('move %d quality:%g, posSum: %d, press key' % (moveIdx, q, posSum))
           print(army)
+          armyIdx,moveIdx=self.Next(armyIdx,moveIdx)
 
         print('exit manual mode')
 
@@ -499,9 +502,10 @@ class Halma:
   def printBrd(self,mode,board=None):
     # mode
     # 0x01: raw
-    # 0x02: display all players
+    # 0x02: display bw board
     # 0x04: display as float values (0 value= out of board)
-    # 0x08: display man idx of player
+    # 0x08: display small colored board
+    # 0x10: display small colored board
     if board is None:
       board=self.board
     if mode&1:
@@ -517,7 +521,7 @@ class Halma:
         for i in range(s[1]):
           k=board[j,i]
           if k==7: ss+='  '#'+-'
-          elif k==0: ss+=' .'#'cd'
+          elif k==0: ss+=' -'#'cd'
           else: ss+='%2.x'%k
         print(ss[ofsS:ofsE])
     if mode&4:
@@ -591,6 +595,39 @@ class Halma:
             ss+=COL[col]+' '+c
         #print(ss[ofsS:ofsE])
         print(ss[ofsS:]+COL[0])
+    if mode&0x10:
+      R='\033[0m'  #reset
+      C=( #color map
+        '\033[38;5;237;7m',  #empty
+        '\033[31;7m',  #army1
+        '\033[32;7m',  #army2
+        '\033[33;7m',  #army3
+        '\033[34;7m',  #army4
+        '\033[35;7m',  #army5
+        '\033[36;7m',  #army6
+      )
+      I=' *+-%:+~0123456789abcdefghijklmnop'
+      s=board.shape
+      sz=self.size
+      w=sz*4
+      ofsS=sz*3*1
+      for j in range(s[0]):
+        ss1=ss2='   '*(w-j)
+        soob=True#start out of board
+        for i in range(s[1]):
+          k=board[j,i]
+          if k==7:
+            if soob: ss1+='      ';ss2+='      ';continue#'+-'
+            else: break
+          else:
+            soob=False
+            c=k&0xff # color index
+            i=k>>8   # character index
+            ss1+='  '+C[c]+'   '+R+' '
+            ss2+=' '+C[c]+'  '+I[i]+'  '+R
+        print(ss1[ofsS:])
+        print(ss2[ofsS:])
+        print(ss1[ofsS:])
 
 
   def SeekTreeRoot(self, depth=2):
@@ -735,7 +772,8 @@ if __name__ == '__main__':
     #halma.Init([1,2])
     #halma.SeekMoves(armyIdx=0)
 
-    halma.Init([1,])
+    #halma.Init([1,])
+    halma.Init([1,3])
     #srcPos=halma.Move(halma.armies[0],0,17*5+6,verb=True)
     print('Initialization done, press key')
     halma.Run()

@@ -78,10 +78,10 @@ class Halma:
     sil[4]=w*(2*sz+1)  + sz
     sil[5]=w*sz
 
-  def Init(self, armyLbl=range(1,7)):
+  def Init(self, armyLbl=range(1,7),armyIdxAI=()):
     verb=self.verbose
     self.board=self.emptyboard()
-    self.InitArmies(armyLbl)
+    self.InitArmies(armyLbl,armyIdxAI)
     self.InitWeightMap()
     if verb&0x01: self.printBrd(0x1b)#(0x3)
 
@@ -102,11 +102,12 @@ class Halma:
         s+=w
     return board
 
-  def InitArmies(self, armyLbl,board=None):
+  def InitArmies(self,armyLbl,armyIdxAI):
     sz=self.size
     w=sz*4+1
     bd=self.board.ravel()
-    self.armiesLbl=armiesLbl=np.array(armyLbl)
+    self.armiesLbl=armiesLbl=np.array(armyLbl,np.uint8)
+    self.armyIdxAI=np.array(armyIdxAI,np.uint8)
     numArmy=armiesLbl.size
     armySz=sz*(sz+1)//2
     self.armies=armies=np.ndarray((numArmy,armySz),dtype=np.uint16)
@@ -226,130 +227,159 @@ class Halma:
     brd[army]=armyLbl
     self.armies[armyIdx,:]=army
 
-  def Next(self,armyIdx,moveIdx):
+  def Next(self,moveIdx,armyIdx):
     armyIdx+=1
     if armyIdx==self.armies.shape[0]:
       armyIdx=0
       moveIdx+=1
     return armyIdx,moveIdx
 
+  def ManualMove(self,colBrd,brdDsp):
+    (bd,w,maxIdx,armyIdx,army,armyLbl)=self.skConst
+    cbd=colBrd.ravel()
+    skArmy=np.zeros((1,),dtype=dtSeekArmy)[0]
+    self.SeekMoves(skArmy)
+    self.EvalMoves(skArmy)
+    #self.ShowSeekArmy(skArmy)
+    numMv=skArmy['numMoves']
+    mvArr=skArmy['moves'][:numMv]
+    uManIdx=np.unique(mvArr['manIdx'])
+    print('possible moves:%d. select man idx (any key to exit)'%numMv)
+    print(uManIdx)
+    cbd[army]=armyLbl+((8+np.arange(army.shape[0]))<<8)
+    self.printBrd(brdDsp,colBrd)
+    cbd[army]=armyLbl
+    try:
+      manIdx=int(getkey())
+    except (ValueError,TypeError):
+      return None
+    if not manIdx in uManIdx: return None
+    numMv=skArmy['numMoves']
+    mvArr=skArmy['moves'][:numMv]
+    lst=np.nonzero(mvArr['manIdx']==manIdx)
+    #print(mvArr)
+    mvArr=mvArr[lst]
+    cbd[army[manIdx]]=armyLbl+(1<<8)  #invert color
+    for i,v in enumerate(mvArr):
+      #cbr[v[1]]=armyLbl+((i+1)<<4)
+      cbd[v[1]]=+((8+i)<<8)  #display number in army color
+      if i<10:
+        s=chr(ord('0')+i)
+      else:
+        s=chr(ord('a')-10+i)
+      print('%s: %3d %.4g'%(s,v[1],v[2]))
+    self.printBrd(brdDsp,colBrd)
+
+    try:
+      k=getkey()
+      if k<='9':
+        k=ord(k)-ord('0')
+      else:
+        k=ord(k)-ord('a')+10
+      mv=mvArr[k]
+    except IndexError:
+      return None
+
+    return mv
+
   def Run(self):
     '''press:
  x: quit
  h: help
- w: weight map
- t: treesearch
+ a: auto move loop
+ b: best move (depth 1)
+ l: move history
+ u: undo one move
  s: show moves of one depth
- m: manual move
- b: best move (depth 1)'''
+ t: treesearch
+ w: weight map'''
 
     #self.PlaceArmy(1,[110, 91, 22, 38, 39,108, 73, 92, 57, 58])
     #self.PlaceArmy(1,[231,250,266,232,213,284,267,233,196,248])
-    #self.printBrd(0x2,)
+    brdDsp=0x08# 10 #0x08 #0x10
+    self.printBrd(brdDsp)
+    print('Initialization done, press key')
     print(Halma.Run.__doc__)
-    armyIdx,moveIdx=(0,1)
+    moveIdx,armyIdx,=(1,0)
+    hist=[] #history of all movess
+    for i in range(self.armiesLbl.shape[0]):
+      hist.append((0,i,self.armies[i,:].copy(),None,None))
+
     while True:
       k=getkey()
       #k='s'
       if k=='x':   break
-      elif k=='h': print(Halma.Run.__doc__)
+      elif k=='h':     self.printBrd(brdDsp,); print(Halma.Run.__doc__)
       elif k=='b':#do best computer move depth=1
         self.SeekCalcConsts(armyIdx)
         (bd,w,maxIdx,armyIdx,army,armyLbl)=self.skConst
-        skArmy=np.zeros((1,),dtype=dtSeekArmy)[0]
-        self.SeekMoves(skArmy)
-        self.EvalMoves(skArmy)
-        q=self.ExecBestMove(skArmy) #quality
+        mv=self.ExecBestMove() #quality
         posSum=self.distMap[0].ravel()[self.armies[0]].sum() #positional sum
-        self.quality=(q,posSum)
-        print('move %d quality:%g, posSum: %d, press key'%(moveIdx,q,posSum))
+        hist.append((moveIdx,armyIdx,army.copy(),mv[2],posSum))
+        print('armyLbl:%d move:%d quality:%g posSum: %d'%(armyLbl,moveIdx,mv[2],posSum))
         print(army)
-        armyIdx,moveIdx=self.Next(armyIdx,moveIdx)
+        self.printBrd(brdDsp)
+        armyIdx,moveIdx=self.Next(moveIdx,armyIdx)
         if posSum==150:
-          print('Finished!, press key')
-          break
+          print('Finished!')
       elif k=='t':  #do best computer move depth=n
         self.SeekCalcConsts(armyIdx)
         (bd,w,maxIdx,armyIdx,army,armyLbl)=self.skConst
-        q=self.SeekTreeRoot(depth=1)
+        mv=self.SeekTreeRoot(depth=1)
         posSum=self.distMap[0].ravel()[self.armies[0]].sum() #positional sum
-        self.quality=(q,posSum)
-        print('move %d quality:%g, posSum: %d, press key'%(moveIdx,q,posSum))
+        hist.append((moveIdx,armyIdx,army.copy(),mv[2],posSum))
+        print('armyLbl:%d move:%d quality:%g posSum: %d'%(armyLbl,moveIdx,mv[2],posSum))
         print(army)
-        armyIdx,moveIdx=self.Next(armyIdx,moveIdx)
+        self.printBrd(brdDsp)
+        armyIdx,moveIdx=self.Next(moveIdx,armyIdx)
       elif k=='s':#show moves
         self.SeekCalcConsts(armyIdx)
         skArmy=np.zeros((1,),dtype=dtSeekArmy)[0]
         self.SeekMoves(skArmy)
         self.EvalMoves(skArmy)
-        self.ShowSeekArmy(skArmy)
+        self.ShowSeekArmy(skArmy,brdDsp)
       elif k=='w':#show weight map
         self.printBrd(0x5,self.weightMap[0,:,:])
         self.printBrd(0x5,self.distMap[0,:,:])
-      elif k=='m':  #manual move
+      elif k=='u':  #undo
+        print('undo')
+        bd=self.board.ravel()
+
+        numArmy=self.armiesLbl.shape[0]
+        if len(hist)<=numArmy:
+          continue # nothing to undo
+        moveIdx,armyIdx,army,d,e=hist.pop()
+        bd[army]=0
+        a,aIdx,army,d,e=hist[-(numArmy)]
+        self.armies[aIdx,:]=army
+        bd[army]=self.armiesLbl[aIdx]
+        self.printBrd(brdDsp)
+      elif k=='l':  #log
+        print('log')
+        for h in hist:
+          print(h)
+      elif k=='a':  #manual move
         colBrd=np.ndarray(shape=self.board.shape,dtype=np.uint16)
         colBrd[:]=self.board
-        cbd=colBrd.ravel()
-        #for i in range(numArmy):  # fill armies
-        #  army=armies[i,:]
-        #  armyLbl=armiesLbl[i]
-        #  bd[army]=armyLbl
         while True:
           self.SeekCalcConsts(armyIdx)
           (bd,w,maxIdx,armyIdx,army,armyLbl)=self.skConst
-          skArmy=np.zeros((1,),dtype=dtSeekArmy)[0]
-          self.SeekMoves(skArmy)
-          self.EvalMoves(skArmy)
-          #self.ShowSeekArmy(skArmy)
-          numMv=skArmy['numMoves']
-          mvArr=skArmy['moves'][:numMv]
-          cbd[army]=armyLbl+(np.arange(1,1+army.shape[0])<<8)
-          self.printBrd(0x8,colBrd)
-          cbd[army]=armyLbl
-          print('%d possible moves. select man idx (enter to exit)'%numMv)
-          uManIdx=np.unique(mvArr['manIdx'])
-          print(uManIdx)
-          try:
-            manIdx=int(getkey())
-          except (ValueError,TypeError):
-            break
-          if not manIdx in uManIdx: break
-          numMv=skArmy['numMoves']
-          mvArr=skArmy['moves'][:numMv]
-          lst=np.nonzero(mvArr['manIdx']==manIdx)
-          #print(mvArr)
-          mvArr=mvArr[lst]
-          cbd[army[manIdx]]=armyLbl+0x10 #invert color
-          for i,v in enumerate(mvArr):
-            #cbr[v[1]]=armyLbl+((i+1)<<4)
-            cbd[v[1]]=((i+1)<<8) #display empty with a number
-            if i<10:
-              s=chr(ord('0')+i)
-            else:
-              s=chr(ord('a')-10+i)
-            print('%s: %3d %.4g'%(s,v[1],v[2]))
-          self.printBrd(0x8,colBrd)
-
-          try:
-            k=getkey()
-            if k<='9':
-              k=ord(k)-ord('0')
-            else:
-              k=ord(k)-ord('a')+10
-            mv=mvArr[k]
-          except IndexError:
-            break
-
-          manIdx=mv[0];dstPos=mv[1];q=mv[2]
-          self.Move(army,manIdx,dstPos,verb=True)
+          if armyIdx in self.armyIdxAI:
+            mv=self.SeekTreeRoot(depth=1)
+          else:
+            mv=self.ManualMove(colBrd,brdDsp)
+            if mv is None: break
+            manIdx=mv[0]
+            dstPos=mv[1]
+            self.Move(army,manIdx,dstPos)
           colBrd[:]=self.board
           posSum = self.distMap[0].ravel()[self.armies[0]].sum()  # positional sum
-          self.quality = (q, posSum);
-          print('move %d quality:%g, posSum: %d, press key' % (moveIdx, q, posSum))
+          hist.append((moveIdx,armyIdx,army.copy(),mv[2],posSum))
+          print('armyLbl:%d move:%d quality:%g posSum: %d' % (armyLbl,moveIdx,mv[2],posSum))
           print(army)
-          armyIdx,moveIdx=self.Next(armyIdx,moveIdx)
-
+          armyIdx,moveIdx=self.Next(moveIdx,armyIdx)
         print('exit manual mode')
+        self.printBrd(brdDsp)
 
   def SeekCalcConsts(self,armyIdx):
     board=self.board
@@ -403,16 +433,20 @@ class Halma:
       bd[man]=armyLbl
     skArmy['numMoves']=i
 
-  def ExecBestMove(self,skArmy):
+  def ExecBestMove(self,disp=0x00):
     (bd,w,maxIdx,armyIdx,army,armyLbl)=self.skConst
+    skArmy=np.zeros((1,),dtype=dtSeekArmy)[0]
+    self.SeekMoves(skArmy)
+    self.EvalMoves(skArmy)
     mvArr=skArmy['moves']
     numMv=skArmy['numMoves']
+    print('possible moves:%d'%numMv)
     mvQ=mvArr['quality']
     best=np.argmax(mvQ)
     mv=mvArr[best]
     manIdx=mv[0];dstPos=mv[1]
-    self.Move(army,manIdx,dstPos,verb=True)
-    return mvQ[best]
+    self.Move(army,manIdx,dstPos,disp=disp)
+    return mv
 
   @staticmethod
   def SeekLongMoves(skArmy,bd,w,manIdx,maxIdx,mv,man,pcur,i):
@@ -432,7 +466,7 @@ class Halma:
     if p2<maxIdx and bd[p1]>0 and bd[p1]<=6 and not bd[p2]: mv[i][0]=manIdx;mv[i][1]=p2;bd[p2]=8;i=Halma.SeekLongMoves(skArmy,bd,w,manIdx,maxIdx,mv,man,p2,i+1)
     return i
 
-  def EvalMoves(self,skArmy):
+  def EvalMoves(self,skArmy,disp=0x00):
     (bd,w,maxIdx,armyIdx,army,armyLbl)=self.skConst
     mvArr=skArmy['moves']
     numMv=skArmy['numMoves']
@@ -444,7 +478,7 @@ class Halma:
     for k in range(numMv):
       mv=mvArr[k]
       manIdx=mv[0];dstPos=mv[1]
-      srcPos=self.Move(army,manIdx,dstPos,verb=verb)
+      srcPos=self.Move(army,manIdx,dstPos,disp=disp)
       mvQ=wm[army].sum()
       #maxDiff=np.diff(np.sort(army)).max()/seek.w
       maxDiff=np.diff(np.sort(dm[army])).max()
@@ -466,7 +500,7 @@ class Halma:
 
     #  skArmy['numMoves']=3
 
-  def ShowSeekArmy(self,skArmy):
+  def ShowSeekArmy(self,skArmy,disp=0):
     (bd,w,maxIdx,armyIdx,army,armyLbl)=self.skConst
     mvArr=skArmy['moves']
     numMv=skArmy['numMoves']
@@ -475,8 +509,8 @@ class Halma:
     colBrd=np.ndarray(shape=self.board.shape,dtype=np.uint16)
     colBrd[:]=self.board
     cbd=colBrd.ravel()
-    cbd[army]=armyLbl+(np.arange(1,1+army.shape[0])<<8)
-    self.printBrd(0x8,colBrd)
+    cbd[army]=armyLbl+((8+np.arange(army.shape[0])<<8))
+    self.printBrd(disp,colBrd)
 
     for i in range(numMv):
       manIdx=mvArr[i][0]
@@ -487,7 +521,7 @@ class Halma:
     verb=self.verbose&0x08
     print('%d moves'%numMv)
 
-  def Move(self,army,manIdx,dstPos,board=None,verb=False):
+  def Move(self,army,manIdx,dstPos,board=None,disp=0x00):
     if board is None: board=self.board
     bd=board.ravel()
     srcPos=army[manIdx]
@@ -495,8 +529,8 @@ class Halma:
     bd[srcPos]=0
     army[manIdx]=dstPos
     bd[dstPos]=lbl
-    if verb:
-      self.printBrd(0x2)#0x03
+    if disp:
+      self.printBrd(disp)
     return srcPos
 
   def printBrd(self,mode,board=None):
@@ -542,7 +576,7 @@ class Halma:
     if mode&8:
       R='\033[0m'  #reset
       C=( #color map
-        '\033[38;5;23m',  #empty
+        '\033[38;5;237m',  #empty
         '\033[31m',  #army1
         '\033[32m',  #army2
         '\033[33m',  #army3
@@ -550,7 +584,7 @@ class Halma:
         '\033[35m',  #army5
         '\033[36m',  #army6
       )
-      I=' *+-%:+~0123456789abcdefghijklmnop'
+      I='X*+-%:+~0123456789abcdefghijklmnop'
       s=board.shape
       sz=self.size
       w=sz*4
@@ -567,8 +601,10 @@ class Halma:
             soob=False
             c=k&0xff # color index
             i=k>>8   # character index
-            ss+=' '+C[c]+I[i]+R
-        #print(ss[ofsS:ofsE])
+            if c==0 and i:
+              ss+=' '+I[i] #special char on empty field
+            else:
+              ss+=' '+C[c]+I[i]+R
         print(ss[ofsS:])
     if mode&0x10:
       R='\033[0m'  #reset
@@ -605,7 +641,7 @@ class Halma:
         print(ss1[ofsS:])
 
 
-  def SeekTreeRoot(self, depth=2):
+  def SeekTreeRoot(self, depth=2,disp=0x00):
     #depth= search deph levels
     #reduce = maximal children per node
     verb=self.verbose&0x10
@@ -621,7 +657,7 @@ class Halma:
 
     numMv=skArmy['numMoves']
     mvArr=skArmy['moves'][:numMv]
-    print('%d moves'%numMv)
+    print('possible moves:%d'%numMv)
 
     qArr=mvArr['quality']
     #for mvIdx in range(numMv):
@@ -661,8 +697,8 @@ class Halma:
     mv=mvArr[self.bestIdx]
     manIdx=mv[0];dstPos=mv[1]
     print ('SeekTreeRoot %d, %g'%(self.bestIdx, self.bestTreeMove,))
-    self.Move(army,manIdx,dstPos,verb=True)
-    return mv['quality']
+    self.Move(army,manIdx,dstPos,disp=disp)
+    return mv
 
   def SeekTree(self, rootMvIdx, depth):
     #depth= search deph levels
@@ -736,7 +772,7 @@ if __name__ == '__main__':
 
   def main():
     #v=0xffff
-    v=0x03
+    v=0x00
     #v=0xf3
     #v=0x02
     halma=Halma(verbose=v)
@@ -748,8 +784,7 @@ if __name__ == '__main__':
     #halma.SeekMoves(armyIdx=0)
 
     #halma.Init([1,])
-    halma.Init([1,3])
-    #srcPos=halma.Move(halma.armies[0],0,17*5+6,verb=True)
-    print('Initialization done, press key')
+    #halma.Init([1,3])
+    halma.Init([2,4],[0,])
     halma.Run()
   main()

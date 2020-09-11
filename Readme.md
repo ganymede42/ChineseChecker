@@ -1,3 +1,41 @@
+
+Chinese Checker
+===============
+```
+So far the AI of the graphical nice implementations (as on GooglePlay or AppleStore) were mostly weak,
+but focus obviously more more on the graphics.
+
+This implementation of the game focuses on the AI and not on the user interface.
+All is written by now in python using numpy library.
+
+Interfacing with C/C++ is prepared but not implemented yet. Neverless the framework is well prepared,
+so that the computational part of tree search is easily portable to C/C++.
+
+
+             -
+            - -
+           - - -
+          - - - -
+ - - - - - - - - - 2 2 2 2
+  - - - - - - - - - 2 2 2
+   - - - - - - - - - 2 2
+    - - - - - - - - - 2
+     - - - - - - - - -
+    - - - - - - - - - -
+   - - - - - - - - - - -
+  - - - - - - - - - - - -
+ - - - - - - - - - - - - -
+          4 4 4 4
+           4 4 4
+            4 4
+             4
+
+Have fun to try to beat the AI...
+so far I am not the worst player... but still weaker than the AI.
+```
+
+
+
 Board Representation
 --------------------
 ```
@@ -66,24 +104,3 @@ Moves
 #Possible jump moves:
 #=a=-2*18 b=-2*17 c=-1*2 d=+1*2 e=+17*2 f=+18*2
 ```
-
-
-
-
-            .     .     .     .     1     .     .     .     .     .     .     .     .     .     .     .     .
-         .     .     .     .     2     2     .     .     .     .     .     .     .     .     .     .     .
-      .     .     .     .     3     3     3     .     .     .     .     .     .     .     .     .     .
-   .     .     .     .     4     4     4     4     .     .     .     .     .     .     .     .     .
-  5     5     5     5     5     5     5     5     5     5     5     5     5     .     .     .     .
-     6     6     6     6     6     6     6     6     6     6     6     6     .     .     .     .
-  .     7     7     7     7     7     7     7     7     7     7     7     .     .     .     .
-     .     8     8     8     8     8     8     8     8     8     8     .     .     .     .
-  .     .     9     9     9     9     9     9     9     9     9     .     .     .     .
-     .    10    10    10    10    10    10    10    10    10    10     .     .     .
-  .    11    11    11    11    11    11    11    11    11    11    11     .     .
-    12    12    12    12    12    12    12    12    12    12    12    12     .
- 13    13    13    13    13    13    13    13    13    13    13    13    13
-     .     .     .     .    14    14    14    14     .     .     .     .
-  .     .     .     .     .    15    15    15     .     .     .     .
-     .     .     .     .     .    16    16     .     .     .     .
-  .     .     .     .     .     .    17     .     .     .     .

@@ -540,34 +540,17 @@ class Halma:
           #else: ss+='+%4.3g-'%(k*10.123)
         print(ss[ofsS:ofsE])
     if mode&8:
-      #0 empty
-      #1..6 man of the army '*' in color
-      #7 out of board
-      #(k>>4) > plot this as a number 0..9..a..z
-      #https://www.lihaoyi.com/post/BuildyourownCommandLinewithANSIescapecodes.html#8-colors
-      #Black: \u001b[30m
-      #Red: \u001b[31m
-      #Green: \u001b[32m
-      #Yellow: \u001b[33m
-      #Blue: \u001b[34m
-      #Magenta: \u001b[35m
-      #Cyan: \u001b[36m
-      #White: \u001b[37m
-      #Bright Black: \u001b[30;1m
-      #Bright Red: \u001b[31;1m
-      #Bright Green: \u001b[32;1m
-      #Bright Yellow: \u001b[33;1m
-      #Bright Blue: \u001b[34;1m
-      #Bright Magenta: \u001b[35;1m
-      #Bright Cyan: \u001b[36;1m
-      #Bright White: \u001b[37;1m
-      #Reset: \u001b[0m
-
-      #COL={'RESET':'\033[0m','r':'\033[1;31m'}
-      #print(COL['WARN'])
-      COL=('\033[0m', '\033[31m'  ,'\033[32m'  ,'\033[33m'  ,'\033[34m'  ,'\033[35m'  ,'\033[36m'  ,
-           '\033[38;5;226m','\033[32;7m','\033[33;7m','\033[34m;7','\033[35;7m','\033[36;7m',)
-
+      R='\033[0m'  #reset
+      C=( #color map
+        '\033[38;5;23m',  #empty
+        '\033[31m',  #army1
+        '\033[32m',  #army2
+        '\033[33m',  #army3
+        '\033[34m',  #army4
+        '\033[35m',  #army5
+        '\033[36m',  #army6
+      )
+      I=' *+-%:+~0123456789abcdefghijklmnop'
       s=board.shape
       sz=self.size
       w=sz*4
@@ -582,19 +565,11 @@ class Halma:
             else: break
           else:
             soob=False
-          if k==0: ss+=COL[k]+' .'#'cd'
-          #else: ss+='%2.x'%k
-          else:
-            col=k&0xf # 1..6 for armies
-            if k&0x10:
-              col+=6 #take inverted colors
-            c=k>>8;
-            if c==0: c='*'
-            elif c<=0xa: c=chr(ord('0')+c-1)
-            else:        c=chr(ord('a')+c-1-0xa)
-            ss+=COL[col]+' '+c
+            c=k&0xff # color index
+            i=k>>8   # character index
+            ss+=' '+C[c]+I[i]+R
         #print(ss[ofsS:ofsE])
-        print(ss[ofsS:]+COL[0])
+        print(ss[ofsS:])
     if mode&0x10:
       R='\033[0m'  #reset
       C=( #color map

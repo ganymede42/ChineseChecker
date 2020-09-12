@@ -486,7 +486,10 @@ class Halma:
       srcPos=self.Move(army,manIdx,dstPos,disp=disp)
       mvQ=wm[army].sum()
       #maxDiff=np.diff(np.sort(army)).max()/seek.w
-      maxDiff=np.diff(np.sort(dm[army])).max()
+      #maxDiff=np.diff(np.sort(dm[army])).max()
+      #allow max 4 mans below
+      maxDiff=np.diff(np.sort(dm[army]))[:4].max()
+
       if maxDiff>2:
         mvQ-=maxDiff*1.
       mv[2]=mvQ

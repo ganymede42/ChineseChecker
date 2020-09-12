@@ -78,10 +78,10 @@ class Halma:
     sil[4]=w*(2*sz+1)  + sz
     sil[5]=w*sz
 
-  def Init(self, armyLbl=range(1,7),armyIdxAI=()):
+  def Init(self, armyLbl=range(1,7),armyIdxAI=(),armyIdxFirst=0):
     verb=self.verbose
     self.board=self.emptyboard()
-    self.InitArmies(armyLbl,armyIdxAI)
+    self.InitArmies(armyLbl,armyIdxAI,armyIdxFirst)
     self.InitWeightMap()
     if verb&0x01: self.printBrd(0x1b)#(0x3)
 
@@ -102,12 +102,12 @@ class Halma:
         s+=w
     return board
 
-  def InitArmies(self,armyLbl,armyIdxAI):
+  def InitArmies(self,armyLbl,armyIdxAI,armyIdxFirst):
     sz=self.size
     w=sz*4+1
     bd=self.board.ravel()
     self.armiesLbl=armiesLbl=np.array(armyLbl,np.uint8)
-    self.armyIdxAI=np.array(armyIdxAI,np.uint8)
+    self.armyIdxAI=armyIdxAI=np.array(armyIdxAI,np.uint8)
     numArmy=armiesLbl.size
     armySz=sz*(sz+1)//2
     self.armies=armies=np.ndarray((numArmy,armySz),dtype=np.uint16)
@@ -129,7 +129,14 @@ class Halma:
           k += j
           s += w+1
       bd[army]=armyLbl
-      #self.print(1)
+    if armyIdxFirst>0:
+      self.armiesLbl=np.roll(armiesLbl,-armyIdxFirst,0)
+      self.armyIdxAI=(armyIdxAI+(numArmy-armyIdxFirst))%numArmy
+      self.armies=np.roll(armies,-armyIdxFirst,0)
+    #print(self.armiesLbl)
+    #print(self.armyIdxAI)
+    #print(self.armies)
+    #print('Initialization done')
 
   @staticmethod
   def PlaceArmies(board, armies, armiesLbl):
@@ -282,7 +289,7 @@ class Halma:
 
     return mv
 
-  def Run(self):
+  def Run(self,brdDsp=0x08):
     '''press:
  x: quit
  h: help
@@ -296,11 +303,9 @@ class Halma:
 
     #self.PlaceArmy(1,[110, 91, 22, 38, 39,108, 73, 92, 57, 58])
     #self.PlaceArmy(1,[231,250,266,232,213,284,267,233,196,248])
-    brdDsp=0x08# 10 #0x08 #0x10
-    self.printBrd(brdDsp)
-    print('Initialization done, press key')
     print(Halma.Run.__doc__)
     moveIdx,armyIdx,=(1,0)
+    self.printBrd(brdDsp)
     hist=[] #history of all movess
     for i in range(self.armiesLbl.shape[0]):
       hist.append((0,i,self.armies[i,:].copy(),None,None))
@@ -309,7 +314,7 @@ class Halma:
       k=getkey()
       #k='s'
       if k=='x':   break
-      elif k=='h':     self.printBrd(brdDsp,); print(Halma.Run.__doc__)
+      elif k=='h': print(Halma.Run.__doc__);self.printBrd(brdDsp,)
       elif k=='b':#do best computer move depth=1
         self.SeekCalcConsts(armyIdx)
         (bd,w,maxIdx,armyIdx,army,armyLbl)=self.skConst
@@ -634,8 +639,12 @@ class Halma:
             soob=False
             c=k&0xff # color index
             i=k>>8   # character index
-            ss1+='  '+C[c]+'   '+R+' '
-            ss2+=' '+C[c]+'  '+I[i]+'  '+R
+            if c==0 and i!=0:#empty with character
+              ss1+='  '+C[c]+'   '+R+' '
+              ss2+=' '+C[c]+'  '+R+I[i]+C[c]+'  '+R
+            else:
+              ss1+='  '+C[c]+'   '+R+' '
+              ss2+=' '+C[c]+'  '+I[i]+'  '+R
         print(ss1[ofsS:])
         print(ss2[ofsS:])
         print(ss1[ofsS:])
@@ -785,6 +794,10 @@ if __name__ == '__main__':
 
     #halma.Init([1,])
     #halma.Init([1,3])
-    halma.Init([2,4],[0,])
-    halma.Run()
+    #halma.Init([2,4],[0,],0)
+
+    #halma.Init([1,2,3,4,5,6],[0,],1)
+    #halma.Init([2,4],[0,],0)
+    halma.Init([2,4],[0,],1)
+    halma.Run(0x10)#0x08 #0x10
   main()
